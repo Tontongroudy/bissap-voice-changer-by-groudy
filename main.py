@@ -1534,21 +1534,10 @@ class SoundboardTab(tk.Frame):
             slot.volume = vol_var.get()
             slot.play_to_speakers = sp_var.get()
             slot.play_to_mic = mic_var.get()
-            # Rehook shortcut
-            if old_sc and KB_OK:
-                try:
-                    kb.remove_hotkey(old_sc)
-                except Exception:
-                    pass
-            if slot.shortcut and KB_OK:
-                try:
-                    idx = slot.index
-                    kb.add_hotkey(slot.shortcut, lambda i=idx: self.app.soundboard_manager.play(i))
-                except Exception as e:
-                    print(f"[Soundboard] Hotkey erreur: {e}")
             # Save to disk
             self.app.config.set("soundboard_slots", self.app.soundboard_manager.to_dict())
             self._build_grid()
+            self.register_all_hotkeys()
             win.destroy()
 
         tk.Button(btn_row, text="Couleur", command=pick_color,
@@ -1561,15 +1550,50 @@ class SoundboardTab(tk.Frame):
     def load_from_config(self, slots_data: list):
         self.app.soundboard_manager.from_dict(slots_data)
         self._build_grid()
-        # Re-register hotkeys
-        if KB_OK:
-            for slot in self.app.soundboard_manager.slots:
-                if slot.shortcut:
-                    try:
-                        idx = slot.index
-                        kb.add_hotkey(slot.shortcut, lambda i=idx: self.app.soundboard_manager.play(i))
-                    except Exception:
-                        pass
+        self.register_all_hotkeys()
+
+    def register_all_hotkeys(self):
+        """Enregistre (ou re-enregistre) tous les raccourcis globaux du soundboard."""
+        if not KB_OK:
+            return
+        # Désinscrire les anciens
+        for sc in list(self._hotkeys.values()):
+            try:
+                kb.remove_hotkey(sc)
+            except Exception:
+                pass
+        self._hotkeys.clear()
+
+        for slot in self.app.soundboard_manager.slots:
+            sc = slot.shortcut.strip()
+            if not sc:
+                continue
+            try:
+                idx = slot.index
+                kb.add_hotkey(sc, lambda i=idx: self._hotkey_play(i))
+                self._hotkeys[idx] = sc
+                print(f"[Soundboard] Hotkey '{sc}' → slot {idx + 1}")
+            except Exception as e:
+                print(f"[Soundboard] Impossible d'enregistrer '{sc}': {e}")
+
+    def _hotkey_play(self, index: int):
+        """Callback hotkey global — thread-safe, joue le slot."""
+        def _do():
+            sb = self.app.soundboard_manager
+            # Fallback device : si speakers_device non configuré, utiliser le défaut système
+            if sb.speakers_device is None:
+                import sounddevice as _sd
+                try:
+                    default_out = _sd.default.device[1]
+                    sb.speakers_device = default_out if default_out >= 0 else None
+                except Exception:
+                    pass
+            sb.play(index)
+        # Planifier dans le thread tkinter pour la sécurité
+        try:
+            self.app.root.after(0, _do)
+        except Exception:
+            _do()
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1707,8 +1731,9 @@ class App:
                 self.profile_manager.set_active(last_p)
                 self.root.after(500, self.voice_tab.sync_from_chain)
 
-        # Setup profile hotkeys
+        # Setup profile hotkeys + soundboard hotkeys
         self.root.after(1000, self.profiles_tab.setup_all_hotkeys)
+        self.root.after(1200, self.soundboard_tab.register_all_hotkeys)
 
     def _start_audio(self):
         # On ne démarre PAS le moteur audio automatiquement.
