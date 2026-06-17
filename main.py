@@ -1310,6 +1310,10 @@ class SoundboardTab(tk.Frame):
         self.app = app
         self._slot_frames: list = []
         self._hotkeys: dict = {}
+        # Polling hotkeys
+        self._sb_map: dict = {}         # frozenset → slot index
+        self._sb_armed: set = set()     # combos déjà déclenchés (anti-repeat)
+        self._polling = False
         self._build()
 
     def _build(self):
@@ -1588,85 +1592,80 @@ class SoundboardTab(tk.Frame):
         self._build_grid()
         self.register_all_hotkeys()
 
-    # ── Hotkeys globaux soundboard ──────────────────────────────────────
-    # Utilise on_press/on_release avec suivi manuel des touches enfoncées
-    # (add_hotkey est instable pour les combinaisons sur Windows)
-
-    _sb_pressed: set  = set()   # touches actuellement enfoncées (partagé entre instances)
-    _sb_map: dict     = {}      # frozenset de touches normalisées → index de slot
-    _sb_hooks: list   = []      # handles kb.on_press / kb.on_release actifs
+    # ── Hotkeys globaux soundboard (polling kb.is_pressed) ─────────────
+    # Les hooks on_press sont instables sur Windows pour les combos.
+    # kb.is_pressed() utilise GetAsyncKeyState — fiable globalement.
 
     @staticmethod
-    def _norm_key(name: str) -> str:
-        """Normalise un nom de touche : 'left ctrl' → 'ctrl', etc."""
-        n = name.lower().strip()
-        if n in ('left ctrl', 'right ctrl', 'ctrl', 'control', 'left control', 'right control'):
-            return 'ctrl'
-        if n in ('left shift', 'right shift', 'shift'):
-            return 'shift'
-        if n in ('left alt', 'right alt', 'alt', 'altgr'):
-            return 'alt'
-        return n
+    def _is_down(key: str) -> bool:
+        """Vérifie si une touche normalisée est enfoncée (gauche ou droite)."""
+        try:
+            if key == 'ctrl':
+                return kb.is_pressed('left ctrl') or kb.is_pressed('right ctrl')
+            if key == 'shift':
+                return kb.is_pressed('left shift') or kb.is_pressed('right shift')
+            if key == 'alt':
+                return kb.is_pressed('left alt') or kb.is_pressed('right alt')
+            return kb.is_pressed(key)
+        except Exception:
+            return False
 
     @staticmethod
     def _sc_to_frozenset(sc: str) -> frozenset:
-        return frozenset(SoundboardTab._norm_key(p) for p in sc.split('+') if p.strip())
+        out = set()
+        for p in sc.lower().split('+'):
+            p = p.strip().replace('left ', '').replace('right ', '')
+            if p in ('control',): p = 'ctrl'
+            if p in ('altgr',):   p = 'alt'
+            if p:
+                out.add(p)
+        return frozenset(out)
 
     def register_all_hotkeys(self):
-        """Construit la table hotkey → slot et (ré)installe les hooks globaux."""
+        """Reconstruit la table hotkey → slot index."""
+        self._sb_map.clear()
+        self._sb_armed.clear()
         if not KB_OK:
             return
-
-        # Retirer les vieux hooks
-        for h in SoundboardTab._sb_hooks:
-            try:
-                kb.unhook(h)
-            except Exception:
-                pass
-        SoundboardTab._sb_hooks.clear()
-        SoundboardTab._sb_map.clear()
-        SoundboardTab._sb_pressed.clear()
-
-        # Construire la table
         for slot in self.app.soundboard_manager.slots:
             raw = slot.shortcut.strip()
             if not raw:
                 continue
             fs = self._sc_to_frozenset(raw)
-            SoundboardTab._sb_map[fs] = slot.index
-            print(f"[Soundboard] Hotkey {set(fs)} → slot {slot.index + 1}")
+            if fs:
+                self._sb_map[fs] = slot.index
+                print(f"[Soundboard] Hotkey {set(fs)} → slot {slot.index + 1}")
+        if self._sb_map and not self._polling:
+            self._polling = True
+            self._poll_hotkeys()
 
-        if not SoundboardTab._sb_map:
+    def _poll_hotkeys(self):
+        """Vérifie toutes les 40 ms si une combinaison est enfoncée."""
+        if not KB_OK:
+            self._polling = False
             return
+        try:
+            for combo, idx in list(self._sb_map.items()):
+                all_held = all(self._is_down(k) for k in combo)
+                if all_held and combo not in self._sb_armed:
+                    self._sb_armed.add(combo)
+                    self._trigger_play(idx)
+                elif not all_held:
+                    self._sb_armed.discard(combo)
+        except Exception:
+            pass
+        self.after(40, self._poll_hotkeys)
 
-        app_ref = self.app
-
-        def _on_press(e):
-            SoundboardTab._sb_pressed.add(SoundboardTab._norm_key(e.name))
-            cur = frozenset(SoundboardTab._sb_pressed)
-            if cur in SoundboardTab._sb_map:
-                idx = SoundboardTab._sb_map[cur]
-                try:
-                    app_ref.root.after(0, lambda i=idx: _play_slot(i))
-                except Exception:
-                    _play_slot(idx)
-
-        def _on_release(e):
-            SoundboardTab._sb_pressed.discard(SoundboardTab._norm_key(e.name))
-
-        def _play_slot(index: int):
-            sb = app_ref.soundboard_manager
-            if sb.speakers_device is None:
-                try:
-                    import sounddevice as _sd
-                    default_out = _sd.default.device[1]
-                    sb.speakers_device = default_out if default_out >= 0 else None
-                except Exception:
-                    pass
-            sb.play(index)
-
-        SoundboardTab._sb_hooks.append(kb.on_press(_on_press,   suppress=False))
-        SoundboardTab._sb_hooks.append(kb.on_release(_on_release, suppress=False))
+    def _trigger_play(self, index: int):
+        sb = self.app.soundboard_manager
+        if sb.speakers_device is None:
+            try:
+                import sounddevice as _sd
+                default_out = _sd.default.device[1]
+                sb.speakers_device = default_out if default_out >= 0 else None
+            except Exception:
+                pass
+        sb.play(index)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
