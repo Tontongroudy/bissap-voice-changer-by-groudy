@@ -710,7 +710,7 @@ class VoiceTab(tk.Frame):
                                    font=("Segoe UI", 8), bd=1, relief="solid")
         vol_frame.pack(side="left", padx=4, fill="y")
 
-        tk.Label(vol_frame, text="Sensibilité Micro", bg="#13131f", fg="#aaaaaa",
+        tk.Label(vol_frame, text="Entrée", bg="#13131f", fg="#aaaaaa",
                  font=("Segoe UI", 8)).grid(row=0, column=0)
         self.in_vol_var = tk.DoubleVar(value=1.0)
         tk.Scale(vol_frame, from_=0.0, to=3.0, orient="horizontal", variable=self.in_vol_var,
@@ -725,6 +725,24 @@ class VoiceTab(tk.Frame):
                  resolution=0.01, bg="#13131f", fg="#aaaaaa", length=100, showvalue=False,
                  command=lambda v: self._set_volume("out", float(v))
                  ).grid(row=1, column=1, padx=4)
+
+        # ── Sensibilité micro (style Discord) ─────────────────────────
+        sens_frame = tk.LabelFrame(top, text=" Sensibilité micro ", bg="#13131f", fg="#8888cc",
+                                    font=("Segoe UI", 8), bd=1, relief="solid")
+        sens_frame.pack(side="left", padx=4, fill="y")
+
+        # Barre de niveau + marqueur de seuil
+        self._sens_canvas = tk.Canvas(sens_frame, width=190, height=16, bg="#1a1a2a",
+                                       highlightthickness=1, highlightbackground="#333355")
+        self._sens_canvas.pack(padx=4, pady=(6, 2))
+
+        self._sens_var = tk.DoubleVar(value=0.0)
+        tk.Scale(sens_frame, from_=0, to=100, orient="horizontal", variable=self._sens_var,
+                 resolution=1, bg="#13131f", fg="#aaaaaa", showvalue=False, highlightthickness=0,
+                 length=190, command=self._on_sensitivity).pack(padx=4, pady=(0, 4))
+
+        tk.Label(sens_frame, text="◄ Sensible    Strict ►", bg="#13131f", fg="#555577",
+                 font=("Segoe UI", 7)).pack()
 
         # Bypass + Monitoring
         ctrl_frame = tk.Frame(top, bg="#13131f")
@@ -874,6 +892,56 @@ class VoiceTab(tk.Frame):
         # Si le stream monitor n'existe pas encore, le créer à la volée
         if self.monitor_var.get() and self.app.audio_engine._monitor_stream is None:
             self.app.audio_engine.restart_monitor()
+
+    def _on_sensitivity(self, val):
+        """Contrôle de sensibilité style Discord — pilote le Noise Gate."""
+        v = float(val)
+        for e in self.app.effects_chain.effects:
+            if e.name == "Noise Gate":
+                if v < 1.0:
+                    e.enabled = False
+                else:
+                    # 1 → -59 dB (tout passe), 100 → -10 dB (seulement les sons forts)
+                    e.params["threshold_db"] = -60.0 + v * 0.5
+                    e.enabled = True
+                break
+
+    def update_sensitivity(self, rms: float):
+        """Redessine la barre de niveau + marqueur de seuil."""
+        import math
+        c = self._sens_canvas
+        c.update_idletasks()
+        w = c.winfo_width() or 190
+        h = c.winfo_height() or 16
+        c.delete("all")
+        c.create_rectangle(0, 0, w, h, fill="#1a1a2a", outline="")
+
+        if rms > 1e-9:
+            db = 20 * math.log10(rms)
+            level = max(0.0, min(1.0, (db + 60) / 60))
+        else:
+            level = 0.0
+
+        thresh_norm = self._sens_var.get() / 100.0
+        thresh_x    = int(w * thresh_norm)
+        level_x     = int(w * level)
+
+        if level_x > 0:
+            if level > thresh_norm and thresh_norm > 0:
+                # La partie sous le seuil = grise, au-dessus = verte
+                if thresh_x > 0:
+                    c.create_rectangle(0, 2, thresh_x, h - 2, fill="#334455", outline="")
+                c.create_rectangle(thresh_x, 2, level_x, h - 2, fill="#44cc44", outline="")
+            elif thresh_norm == 0.0:
+                # Pas de seuil → toujours vert
+                c.create_rectangle(0, 2, level_x, h - 2, fill="#44cc44", outline="")
+            else:
+                # Sous le seuil → gris
+                c.create_rectangle(0, 2, level_x, h - 2, fill="#334455", outline="")
+
+        # Marqueur de seuil (ligne blanche verticale)
+        if thresh_x > 0:
+            c.create_line(thresh_x, 0, thresh_x, h, fill="white", width=2)
 
     def _apply_devices(self):
         idx_in = self.app._in_device_map.get(self.in_dev_var.get())
@@ -1609,6 +1677,11 @@ class App:
         self.audio_engine.monitoring = monitoring
         self.voice_tab.monitor_var.set(monitoring)
 
+        sens = self.config.get("sensitivity", 0.0)
+        self.voice_tab._sens_var.set(sens)
+        if sens > 0:
+            self.voice_tab._on_sensitivity(str(sens))
+
         # Soundboard slots
         slots = self.config.get("soundboard_slots", [])
         if slots:
@@ -1650,8 +1723,10 @@ class App:
     def _start_vu_loop(self):
         def update():
             try:
-                self.voice_tab.vu_in.update_level(self.audio_engine.in_level)
+                lvl = self.audio_engine.in_level
+                self.voice_tab.vu_in.update_level(lvl)
                 self.voice_tab.vu_out.update_level(self.audio_engine.out_level)
+                self.voice_tab.update_sensitivity(lvl)
             except Exception:
                 pass
             self.root.after(40, update)  # ~25 fps
@@ -1676,6 +1751,7 @@ class App:
             "in_device_name": self.voice_tab.in_dev_var.get(),
             "out_device_name": self.voice_tab.out_dev_var.get(),
             "monitor_device_name": self.voice_tab.monitor_dev_var.get(),
+            "sensitivity": self.voice_tab._sens_var.get(),
         })
 
     def _on_close(self):
