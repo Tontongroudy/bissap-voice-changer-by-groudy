@@ -105,10 +105,20 @@ class AudioEngine:
         sr = self.sample_rate
         buf = self.buffer_size
 
-        # Queue thread-safe pour éviter les craquements entre streams indépendants.
-        # Taille 2 = double-buffer minimal sans latence perceptible.
+        # Une queue par stream de sortie — chacun consomme son propre flux sans conflit.
         import queue as _queue
-        self._audio_q = _queue.Queue(maxsize=2)
+        self._audio_q   = _queue.Queue(maxsize=2)  # → câble virtuel
+        self._monitor_q = _queue.Queue(maxsize=2)  # → haut-parleurs
+
+        def _push(q, data):
+            """Pousse dans la queue ; remplace le plus vieux chunk si pleine."""
+            try:
+                q.put_nowait(data)
+            except _queue.Full:
+                try: q.get_nowait()
+                except _queue.Empty: pass
+                try: q.put_nowait(data)
+                except _queue.Full: pass
 
         def input_cb(indata, frames, time_info, status):
             audio = indata[:, 0].copy() * self.input_volume
@@ -126,48 +136,31 @@ class AudioEngine:
             with self._level_lock:
                 self._out_level = float(np.sqrt(np.mean(processed ** 2)))
 
-            # On pousse dans la queue ; si pleine on remplace le vieux chunk
-            try:
-                self._audio_q.put_nowait(processed.copy())
-            except _queue.Full:
-                try:
-                    self._audio_q.get_nowait()
-                except _queue.Empty:
-                    pass
-                try:
-                    self._audio_q.put_nowait(processed.copy())
-                except _queue.Full:
-                    pass
+            chunk = processed.copy()
+            _push(self._audio_q,   chunk)
+            _push(self._monitor_q, chunk)
 
-            # Mise à jour du buffer partagé (pour le monitor qui peut être désynchronisé)
             with self._proc_lock:
-                self._processed = processed.copy()
+                self._processed = chunk
+
+        def _read_q(q, fallback, frames, outdata):
+            """Lit depuis la queue ; fallback sur le buffer partagé si vide."""
+            try:
+                chunk = q.get_nowait()
+            except _queue.Empty:
+                with self._proc_lock:
+                    chunk = fallback.copy()
+            n = min(len(chunk), frames)
+            outdata[:n, 0] = chunk[:n]
+            if n < frames:
+                outdata[n:] = 0
 
         def output_cb(outdata, frames, time_info, status):
-            """Sortie vers câble virtuel — lit depuis la queue en priorité."""
-            try:
-                chunk = self._audio_q.get_nowait()
-                n = min(len(chunk), frames)
-                outdata[:n, 0] = chunk[:n]
-                if n < frames:
-                    outdata[n:] = 0
-            except Exception:
-                # Fallback sur le buffer partagé si la queue est vide
-                with self._proc_lock:
-                    n = min(frames, len(self._processed))
-                    outdata[:n, 0] = self._processed[:n]
-                if n < frames:
-                    outdata[n:] = 0
+            _read_q(self._audio_q, self._processed, frames, outdata)
 
         def monitor_cb(outdata, frames, time_info, status):
-            """Sortie haut-parleurs — lit le buffer partagé, jamais la queue."""
             if self.monitoring:
-                with self._proc_lock:
-                    chunk = self._processed.copy()
-                n = min(frames, len(chunk))
-                outdata[:n, 0] = chunk[:n]
-                if n < frames:
-                    outdata[n:] = 0
+                _read_q(self._monitor_q, self._processed, frames, outdata)
             else:
                 outdata.fill(0)
 
@@ -228,11 +221,17 @@ class AudioEngine:
         sr = self.sample_rate
         buf = self.buffer_size
 
+        import queue as _queue
+
         def monitor_cb(outdata, frames, time_info, status):
             if self.monitoring:
-                with self._proc_lock:
-                    n = min(frames, len(self._processed))
-                    outdata[:n, 0] = self._processed[:n]
+                try:
+                    chunk = self._monitor_q.get_nowait()
+                except _queue.Empty:
+                    with self._proc_lock:
+                        chunk = self._processed.copy()
+                n = min(len(chunk), frames)
+                outdata[:n, 0] = chunk[:n]
                 if n < frames:
                     outdata[n:] = 0
             else:
@@ -242,7 +241,7 @@ class AudioEngine:
             self._monitor_stream = sd.OutputStream(
                 samplerate=sr, blocksize=buf, dtype="float32",
                 channels=1, device=self.monitor_device,
-                callback=monitor_cb, latency="low",
+                callback=monitor_cb, latency="high",
             )
             self._monitor_stream.start()
         except Exception as e:
