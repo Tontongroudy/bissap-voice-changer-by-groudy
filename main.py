@@ -710,10 +710,10 @@ class VoiceTab(tk.Frame):
                                    font=("Segoe UI", 8), bd=1, relief="solid")
         vol_frame.pack(side="left", padx=4, fill="y")
 
-        tk.Label(vol_frame, text="Entrée", bg="#13131f", fg="#aaaaaa",
+        tk.Label(vol_frame, text="Sensibilité Micro", bg="#13131f", fg="#aaaaaa",
                  font=("Segoe UI", 8)).grid(row=0, column=0)
         self.in_vol_var = tk.DoubleVar(value=1.0)
-        tk.Scale(vol_frame, from_=0.0, to=2.0, orient="horizontal", variable=self.in_vol_var,
+        tk.Scale(vol_frame, from_=0.0, to=3.0, orient="horizontal", variable=self.in_vol_var,
                  resolution=0.01, bg="#13131f", fg="#aaaaaa", length=100, showvalue=False,
                  command=lambda v: self._set_volume("in", float(v))
                  ).grid(row=1, column=0, padx=4)
@@ -965,11 +965,26 @@ class VoiceTab(tk.Frame):
         fill_menu(self.out_dev_menu, self.out_dev_var, out_devices)
         fill_menu(self.monitor_dev_menu, self.monitor_dev_var, out_devices)
 
-        # Auto-sélectionner le câble VB-Audio s'il est détecté
-        for d in out_devices:
-            if "cable" in d["name"].lower() or "vb-audio" in d["name"].lower():
-                self.out_dev_var.set(label(d))
-                break
+        # Restaurer les périphériques sauvegardés
+        saved_in  = self.app.config.get("in_device_name", "")
+        saved_out = self.app.config.get("out_device_name", "")
+        saved_mon = self.app.config.get("monitor_device_name", "")
+
+        all_in_labels  = [label(d) for d in in_devices]
+        all_out_labels = [label(d) for d in out_devices]
+
+        if saved_in and saved_in in all_in_labels:
+            self.in_dev_var.set(saved_in)
+        if saved_out and saved_out in all_out_labels:
+            self.out_dev_var.set(saved_out)
+        elif not saved_out:
+            # Auto-sélectionner le câble VB-Audio s'il est détecté (premier lancement)
+            for d in out_devices:
+                if "cable" in d["name"].lower() or "vb-audio" in d["name"].lower():
+                    self.out_dev_var.set(label(d))
+                    break
+        if saved_mon and saved_mon in all_out_labels:
+            self.monitor_dev_var.set(saved_mon)
 
     def sync_from_chain(self):
         """Synchronise les widgets UI depuis la chaîne d'effets (chargement profil)."""
@@ -1380,7 +1395,30 @@ class SoundboardTab(tk.Frame):
 
         lbl("Raccourci clavier :")
         sc_var = tk.StringVar(value=slot.shortcut)
-        row_entry(sc_var)
+        sc_row = tk.Frame(win, bg="#13131f")
+        sc_row.pack(fill="x", padx=12, pady=2)
+        tk.Entry(sc_row, textvariable=sc_var, bg="#2a2a3a", fg="white",
+                 insertbackground="white", font=("Segoe UI", 10), bd=1, relief="solid"
+                 ).pack(side="left", fill="x", expand=True)
+
+        def _capture():
+            if not KB_OK:
+                return
+            cap_btn.config(text="Appuie...", state="disabled", fg="#ffaa44")
+            win.update_idletasks()
+            def _do():
+                try:
+                    hk = kb.read_hotkey(suppress=False)
+                    sc_var.set(hk)
+                except Exception:
+                    pass
+                cap_btn.config(text="⌨ Capturer", state="normal", fg="white")
+            import threading as _th
+            _th.Thread(target=_do, daemon=True).start()
+
+        cap_btn = tk.Button(sc_row, text="⌨ Capturer", command=_capture,
+                            bg="#2244aa", fg="white", bd=0, padx=6, font=("Segoe UI", 8))
+        cap_btn.pack(side="left", padx=(4, 0))
 
         lbl(f"Volume : {slot.volume:.2f}")
         vol_var = tk.DoubleVar(value=slot.volume)
@@ -1557,9 +1595,19 @@ class App:
         # Apply saved config
         buf = self.config.get("buffer_size", 1024)
         self.audio_engine.buffer_size = buf
-        self.audio_engine.input_volume = self.config.get("input_volume", 1.0)
-        self.audio_engine.output_volume = self.config.get("output_volume", 1.0)
-        self.audio_engine.monitoring = self.config.get("monitoring", False)
+        self.voice_tab.buf_var.set(str(buf))
+
+        in_vol = self.config.get("input_volume", 1.0)
+        self.audio_engine.input_volume = in_vol
+        self.voice_tab.in_vol_var.set(in_vol)
+
+        out_vol = self.config.get("output_volume", 1.0)
+        self.audio_engine.output_volume = out_vol
+        self.voice_tab.out_vol_var.set(out_vol)
+
+        monitoring = self.config.get("monitoring", False)
+        self.audio_engine.monitoring = monitoring
+        self.voice_tab.monitor_var.set(monitoring)
 
         # Soundboard slots
         slots = self.config.get("soundboard_slots", [])
@@ -1625,6 +1673,9 @@ class App:
             "monitoring": self.audio_engine.monitoring,
             "last_profile": self.profile_manager.active_profile,
             "soundboard_slots": self.soundboard_manager.to_dict(),
+            "in_device_name": self.voice_tab.in_dev_var.get(),
+            "out_device_name": self.voice_tab.out_dev_var.get(),
+            "monitor_device_name": self.voice_tab.monitor_dev_var.get(),
         })
 
     def _on_close(self):
