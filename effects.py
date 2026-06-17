@@ -50,11 +50,17 @@ class BaseEffect:
 # ──────────────────────────────────────────────────────────────────────────────
 
 class PitchShifter(BaseEffect):
-    """Pitch shifting par ré-échantillonnage (chunk-friendly)."""
+    """Pitch shifting par interpolation avec crossfade inter-blocs."""
+
+    _XFADE = 64
 
     def __init__(self):
         super().__init__("Pitch Shifter")
         self.params = {"semitones": 0.0}
+        self._prev_tail = None
+
+    def reset(self):
+        self._prev_tail = None
 
     def _process(self, audio, sr):
         n_steps = self.params["semitones"]
@@ -62,9 +68,16 @@ class PitchShifter(BaseEffect):
             return audio
         factor = 2.0 ** (n_steps / 12.0)
         n = len(audio)
-        pos = np.clip(np.arange(n, dtype=np.float32) * factor, 0, n - 1.001)
+        pos = np.clip(np.arange(n, dtype=np.float64) * factor, 0, n - 1.001)
         idx = pos.astype(np.int32)
-        return (audio[idx] * (1 - (pos - idx)) + audio[np.minimum(idx + 1, n - 1)] * (pos - idx)).astype(np.float32)
+        frac = (pos - idx).astype(np.float32)
+        output = (audio[idx] * (1 - frac) + audio[np.minimum(idx + 1, n - 1)] * frac).astype(np.float32)
+        xf = self._XFADE
+        if self._prev_tail is not None and len(self._prev_tail) == xf:
+            fade_in = np.linspace(0.0, 1.0, xf, dtype=np.float32)
+            output[:xf] = output[:xf] * fade_in + self._prev_tail * (1.0 - fade_in)
+        self._prev_tail = output[-xf:].copy()
+        return output
 
 
 class FormantShifter(BaseEffect):
@@ -158,18 +171,30 @@ class Tremolo(BaseEffect):
 class OctaveDoubler(BaseEffect):
     """Doubler d'octave — voix parallèle une octave en dessous ou au-dessus."""
 
+    _XFADE = 64
+
     def __init__(self):
         super().__init__("Octave Doubler")
         self.params = {"octave": -1, "mix": 0.5}  # octave: -1 ou +1
+        self._prev_tail = None
+
+    def reset(self):
+        self._prev_tail = None
 
     def _process(self, audio, sr):
         n_steps = int(self.params["octave"]) * 12.0
         mix = self.params["mix"]
         factor = 2.0 ** (n_steps / 12.0)
         n = len(audio)
-        pos = np.clip(np.arange(n, dtype=np.float32) * factor, 0, n - 1.001)
+        pos = np.clip(np.arange(n, dtype=np.float64) * factor, 0, n - 1.001)
         idx = pos.astype(np.int32)
-        shifted = (audio[idx] * (1 - (pos - idx)) + audio[np.minimum(idx + 1, n - 1)] * (pos - idx)).astype(np.float32)
+        frac = (pos - idx).astype(np.float32)
+        shifted = (audio[idx] * (1 - frac) + audio[np.minimum(idx + 1, n - 1)] * frac).astype(np.float32)
+        xf = self._XFADE
+        if self._prev_tail is not None and len(self._prev_tail) == xf:
+            fade_in = np.linspace(0.0, 1.0, xf, dtype=np.float32)
+            shifted[:xf] = shifted[:xf] * fade_in + self._prev_tail * (1.0 - fade_in)
+        self._prev_tail = shifted[-xf:].copy()
         return audio * (1 - mix) + shifted * mix
 
 
@@ -603,31 +628,67 @@ class GrowlEffect(BaseEffect):
 
 
 class HeliumEffect(BaseEffect):
-    """Effet hélium / chipmunk — pitch + formants décalés vers le haut."""
+    """Effet hélium / chipmunk — pitch shift + filtre high-shelf pour l'aigreur."""
+
+    _XFADE = 64  # crossfade entre blocs pour masquer la discontinuité de pitch shift
 
     def __init__(self):
         super().__init__("Helium")
         self.params = {"amount": 0.5}
+        self._prev_tail = None
+        self._b = self._a = None
         self._last_amount = None
+        self._zi = None
+
+    def reset(self):
+        self._prev_tail = None
+        self._b = self._a = None
+        self._last_amount = None
+        self._zi = None
 
     def _process(self, audio, sr):
-        amount = self.params["amount"]
-        n_steps = amount * 10.0
-        factor = 2.0 ** (n_steps / 12.0)
-        n_orig = len(audio)
-        pos = np.clip(np.arange(n_orig, dtype=np.float32) * factor, 0, n_orig - 1.001)
+        amount = max(0.0, min(1.0, self.params["amount"]))
+        if amount < 0.01:
+            return audio
+
+        # Pitch shift via interpolation linéaire (rapide, pas d'artefact FFT)
+        factor = 2.0 ** (amount * 10.0 / 12.0)
+        n = len(audio)
+        pos = np.clip(np.arange(n, dtype=np.float64) * factor, 0, n - 1.001)
         idx = pos.astype(np.int32)
-        pitched = (audio[idx] * (1 - (pos - idx)) + audio[np.minimum(idx + 1, n_orig - 1)] * (pos - idx)).astype(np.float32)
-        fd = rfft(pitched)
-        fl = len(fd)
-        out_fd = np.zeros(fl, dtype=complex)
-        fm_shift = 1.0 + amount * 0.6
-        indices = np.arange(fl)
-        src = (indices / fm_shift).astype(int)
-        valid = src < fl
-        out_fd[indices[valid]] = fd[src[valid]]
-        self._last_amount = amount
-        return irfft(out_fd, n=n_orig)
+        frac = (pos - idx).astype(np.float32)
+        output = (audio[idx] * (1 - frac) + audio[np.minimum(idx + 1, n - 1)] * frac).astype(np.float32)
+
+        # Crossfade avec la queue du bloc précédent pour éliminer le clic de jonction
+        xf = self._XFADE
+        if self._prev_tail is not None and len(self._prev_tail) == xf:
+            fade_in = np.linspace(0.0, 1.0, xf, dtype=np.float32)
+            output[:xf] = output[:xf] * fade_in + self._prev_tail * (1.0 - fade_in)
+        self._prev_tail = output[-xf:].copy()
+
+        # High-shelf stateful pour l'effet "voix fine" (remplace le FFT formant shift)
+        a_key = round(amount, 3)
+        if self._b is None or self._last_amount != a_key:
+            fc = 1800.0
+            nyq = sr / 2.0
+            w0 = 2 * np.pi * fc / sr
+            A = 10 ** ((amount * 8.0) / 40.0)  # jusqu'à +8 dB à amount=1
+            alpha = np.sin(w0) / 2 * np.sqrt((A + 1.0 / A) * (1.0 / 1.0 - 1) + 2)
+            alpha = max(alpha, 1e-6)
+            b0 =       A * ((A+1) + (A-1)*np.cos(w0) + 2*np.sqrt(A)*alpha)
+            b1 = -2 *  A * ((A-1) + (A+1)*np.cos(w0))
+            b2 =       A * ((A+1) + (A-1)*np.cos(w0) - 2*np.sqrt(A)*alpha)
+            a0 =           (A+1) - (A-1)*np.cos(w0) + 2*np.sqrt(A)*alpha
+            a1 =  2 *     ((A-1) - (A+1)*np.cos(w0))
+            a2 =           (A+1) - (A-1)*np.cos(w0) - 2*np.sqrt(A)*alpha
+            self._b = [b0/a0, b1/a0, b2/a0]
+            self._a = [1.0,   a1/a0, a2/a0]
+            self._last_amount = a_key
+        if self._zi is None:
+            self._zi = signal.lfilter_zi(self._b, self._a) * output[0]
+        output, self._zi = signal.lfilter(self._b, self._a, output, zi=self._zi)
+
+        return np.clip(output, -1.0, 1.0).astype(np.float32)
 
 
 class TelephoneFilter(BaseEffect):
