@@ -7,6 +7,14 @@ import sys
 from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog, colorchooser
 import tkinter as tk
+import numpy as np
+
+try:
+    import sounddevice as _sd_check
+    SD_OK = True
+    del _sd_check
+except ImportError:
+    SD_OK = False
 
 try:
     import customtkinter as ctk
@@ -364,6 +372,269 @@ EFFECT_PARAMS_META = {
 EQ_BANDS = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Testeur de périphériques audio
+# ──────────────────────────────────────────────────────────────────────────────
+
+class DeviceTester(tk.Toplevel):
+    """
+    Fenêtre qui teste tous les périphériques audio détectés :
+    - Entrées : parle et regarde quel VU-mètre bouge → c'est ton micro
+    - Sorties  : clique Bip et écoute où tu entends le son → c'est ton HP/câble
+    """
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.title("Testeur de périphériques audio")
+        self.configure(bg="#0d0d1a")
+        self.geometry("820x600")
+        self.resizable(True, True)
+        self.grab_set()
+
+        self._running = False
+        self._input_streams = []
+        self._vu_vars: dict[int, tk.DoubleVar] = {}
+        self._vu_bars: dict[int, tk.Canvas] = {}
+        self._status_vars: dict[int, tk.StringVar] = {}
+
+        self._build()
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.after(200, self._start_monitoring)
+
+    # ──────────────────────────────────────────────────────────────────
+    def _build(self):
+        header = tk.Label(self, bg="#0d0d1a", fg="#aaaaff",
+                          font=("Segoe UI", 11, "bold"),
+                          text="Parle dans ton micro → regarde quel niveau monte   |   Clique Bip → écoute d'où vient le son")
+        header.pack(fill="x", padx=12, pady=(10, 4))
+
+        paned = tk.PanedWindow(self, orient="horizontal", bg="#0d0d1a",
+                               sashwidth=6, sashpad=2)
+        paned.pack(fill="both", expand=True, padx=8, pady=4)
+
+        # ── Entrées ──────────────────────────────────────────────────
+        in_outer = tk.LabelFrame(paned, text=" 🎙 Entrées (micros) ", bg="#0d0d1a",
+                                  fg="#88ff88", font=("Segoe UI", 9, "bold"),
+                                  bd=1, relief="solid")
+        paned.add(in_outer, minsize=300)
+
+        in_scroll_frame = tk.Frame(in_outer, bg="#0d0d1a")
+        in_scroll_frame.pack(fill="both", expand=True)
+
+        in_canvas = tk.Canvas(in_scroll_frame, bg="#0d0d1a", highlightthickness=0)
+        in_sb = tk.Scrollbar(in_scroll_frame, orient="vertical", command=in_canvas.yview)
+        in_canvas.configure(yscrollcommand=in_sb.set)
+        in_sb.pack(side="right", fill="y")
+        in_canvas.pack(side="left", fill="both", expand=True)
+
+        self._in_frame = tk.Frame(in_canvas, bg="#0d0d1a")
+        cw = in_canvas.create_window((0, 0), window=self._in_frame, anchor="nw")
+        self._in_frame.bind("<Configure>", lambda e: in_canvas.configure(
+            scrollregion=in_canvas.bbox("all")))
+        in_canvas.bind("<Configure>", lambda e: in_canvas.itemconfig(cw, width=e.width))
+
+        # ── Sorties ──────────────────────────────────────────────────
+        out_outer = tk.LabelFrame(paned, text=" 🔊 Sorties (HP / câble) ", bg="#0d0d1a",
+                                   fg="#ffaa44", font=("Segoe UI", 9, "bold"),
+                                   bd=1, relief="solid")
+        paned.add(out_outer, minsize=300)
+
+        out_scroll_frame = tk.Frame(out_outer, bg="#0d0d1a")
+        out_scroll_frame.pack(fill="both", expand=True)
+
+        out_canvas = tk.Canvas(out_scroll_frame, bg="#0d0d1a", highlightthickness=0)
+        out_sb = tk.Scrollbar(out_scroll_frame, orient="vertical", command=out_canvas.yview)
+        out_canvas.configure(yscrollcommand=out_sb.set)
+        out_sb.pack(side="right", fill="y")
+        out_canvas.pack(side="left", fill="both", expand=True)
+
+        self._out_frame = tk.Frame(out_canvas, bg="#0d0d1a")
+        cw2 = out_canvas.create_window((0, 0), window=self._out_frame, anchor="nw")
+        self._out_frame.bind("<Configure>", lambda e: out_canvas.configure(
+            scrollregion=out_canvas.bbox("all")))
+        out_canvas.bind("<Configure>", lambda e: out_canvas.itemconfig(cw2, width=e.width))
+
+        # Charger les périphériques
+        self._load_devices()
+
+        tk.Button(self, text="✕ Fermer", command=self._on_close,
+                  bg="#333355", fg="white", bd=0, padx=16, pady=6,
+                  font=("Segoe UI", 9)).pack(pady=8)
+
+    def _load_devices(self):
+        try:
+            import sounddevice as sd
+            devs = sd.query_devices()
+        except Exception:
+            tk.Label(self._in_frame, text="sounddevice non disponible",
+                     bg="#0d0d1a", fg="#ff6666").pack()
+            return
+
+        for i, dev in enumerate(devs):
+            if dev["max_input_channels"] > 0:
+                self._add_input_row(i, dev["name"])
+            if dev["max_output_channels"] > 0:
+                self._add_output_row(i, dev["name"])
+
+    def _add_input_row(self, idx, name):
+        row = tk.Frame(self._in_frame, bg="#111122", bd=1, relief="solid")
+        row.pack(fill="x", padx=4, pady=2)
+
+        tk.Label(row, text=f"[{idx}]", bg="#111122", fg="#666688",
+                 font=("Consolas", 8), width=4).pack(side="left", padx=(4, 0))
+
+        tk.Label(row, text=name[:38], bg="#111122", fg="#ccccff",
+                 font=("Segoe UI", 8), anchor="w", width=34).pack(side="left", padx=4)
+
+        # VU bar
+        bar = tk.Canvas(row, width=100, height=14, bg="#222233",
+                        highlightthickness=1, highlightbackground="#333355")
+        bar.pack(side="left", padx=4, pady=3)
+        self._vu_bars[idx] = bar
+
+        lbl = tk.Label(row, text="0.0%", bg="#111122", fg="#888888",
+                       font=("Consolas", 7), width=6)
+        lbl.pack(side="left")
+        self._vu_vars[idx] = lbl
+
+    def _add_output_row(self, idx, name):
+        row = tk.Frame(self._out_frame, bg="#1a1100", bd=1, relief="solid")
+        row.pack(fill="x", padx=4, pady=2)
+
+        tk.Label(row, text=f"[{idx}]", bg="#1a1100", fg="#886644",
+                 font=("Consolas", 8), width=4).pack(side="left", padx=(4, 0))
+
+        tk.Label(row, text=name[:34], bg="#1a1100", fg="#ffddaa",
+                 font=("Segoe UI", 8), anchor="w", width=30).pack(side="left", padx=4)
+
+        status = tk.StringVar(value="")
+        self._status_vars[idx] = status
+        tk.Label(row, textvariable=status, bg="#1a1100", fg="#88ff88",
+                 font=("Segoe UI", 7), width=8).pack(side="left")
+
+        tk.Button(row, text="♪ Bip", command=lambda i=idx: self._play_beep(i),
+                  bg="#3a2800", fg="#ffcc44", font=("Segoe UI", 8),
+                  bd=0, padx=8, pady=2, cursor="hand2").pack(side="right", padx=6, pady=3)
+
+    # ──────────────────────────────────────────────────────────────────
+    # Monitoring des entrées en temps réel
+    # ──────────────────────────────────────────────────────────────────
+
+    def _start_monitoring(self):
+        if not SD_OK:
+            return
+        self._running = True
+        import sounddevice as sd
+
+        self._levels: dict[int, float] = {}
+
+        for idx in list(self._vu_bars.keys()):
+            def make_cb(device_idx):
+                def cb(indata, frames, t, status):
+                    if not self._running:
+                        raise sd.CallbackStop()
+                    rms = float(np.sqrt(np.mean(indata ** 2)))
+                    self._levels[device_idx] = rms
+                return cb
+
+            try:
+                s = sd.InputStream(
+                    device=idx, channels=1, samplerate=44100,
+                    blocksize=2048, dtype="float32",
+                    callback=make_cb(idx), latency="high",
+                )
+                s.start()
+                self._input_streams.append(s)
+            except Exception:
+                self._levels[idx] = 0.0
+
+        self._update_vu()
+
+    def _update_vu(self):
+        if not self._running:
+            return
+        for idx, bar in self._vu_bars.items():
+            rms = self._levels.get(idx, 0.0)
+            # Decay
+            self._levels[idx] = rms * 0.85
+            # dB → visuel
+            if rms > 1e-6:
+                import math
+                db = 20 * math.log10(rms)
+                level = max(0.0, min(1.0, (db + 60) / 60))
+            else:
+                level = 0.0
+
+            bar.delete("all")
+            w = bar.winfo_width() or 100
+            h = bar.winfo_height() or 14
+            bar.create_rectangle(0, 0, w, h, fill="#222233", outline="")
+            if level > 0.01:
+                color = "#00cc44" if level < 0.7 else ("#ffcc00" if level < 0.9 else "#ff3333")
+                bar.create_rectangle(0, 0, int(w * level), h, fill=color, outline="")
+
+            lbl = self._vu_vars.get(idx)
+            if lbl:
+                lbl.config(text=f"{level*100:.0f}%")
+
+        self.after(50, self._update_vu)
+
+    # ──────────────────────────────────────────────────────────────────
+    # Test de sortie : joue un bip
+    # ──────────────────────────────────────────────────────────────────
+
+    def _play_beep(self, device_idx):
+        if not SD_OK:
+            return
+
+        status = self._status_vars.get(device_idx)
+        if status:
+            status.set("▶ bip...")
+
+        def _do():
+            try:
+                import sounddevice as sd
+                sr = 44100
+                t = np.linspace(0, 0.6, int(sr * 0.6), endpoint=False)
+                # Bip 880 Hz avec fondu
+                wave = np.sin(2 * np.pi * 880 * t).astype(np.float32)
+                fade = np.ones_like(wave)
+                fade_len = sr // 10
+                fade[:fade_len] = np.linspace(0, 1, fade_len)
+                fade[-fade_len:] = np.linspace(1, 0, fade_len)
+                wave *= fade * 0.5
+
+                # Essaie en stéréo, fallback mono
+                try:
+                    stereo = np.column_stack([wave, wave])
+                    sd.play(stereo, samplerate=sr, device=device_idx, blocking=True)
+                except Exception:
+                    sd.play(wave, samplerate=sr, device=device_idx, blocking=True)
+
+                if status:
+                    self.after(0, lambda: status.set("✓"))
+                    self.after(2000, lambda: status.set(""))
+            except Exception as e:
+                if status:
+                    self.after(0, lambda: status.set("❌"))
+                print(f"[DeviceTester] Bip erreur device {device_idx}: {e}")
+
+        threading.Thread(target=_do, daemon=True).start()
+
+    # ──────────────────────────────────────────────────────────────────
+
+    def _on_close(self):
+        self._running = False
+        for s in self._input_streams:
+            try:
+                s.stop()
+                s.close()
+            except Exception:
+                pass
+        self._input_streams.clear()
+        self.destroy()
+
+
 class VoiceTab(tk.Frame):
     def __init__(self, parent, app, **kw):
         super().__init__(parent, bg="#13131f", **kw)
@@ -476,6 +747,11 @@ class VoiceTab(tk.Frame):
         tk.Button(ctrl_frame, text="? Guide routing", command=self._show_routing_guide,
                   bg="#2a2240", fg="#aaaaff", font=("Segoe UI", 8),
                   bd=0, padx=6, pady=2, cursor="hand2").pack(anchor="w", pady=(4, 0))
+
+        tk.Button(ctrl_frame, text="🔍 Tester périphériques",
+                  command=lambda: DeviceTester(self),
+                  bg="#1a2a1a", fg="#88ff88", font=("Segoe UI", 8),
+                  bd=0, padx=6, pady=2, cursor="hand2").pack(anchor="w", pady=(2, 0))
 
         # VU-mètres
         vu_frame = tk.Frame(top, bg="#13131f")
