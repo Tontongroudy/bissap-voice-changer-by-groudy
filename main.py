@@ -1503,23 +1503,33 @@ class SoundboardTab(tk.Frame):
             keys_held = set()
             best      = ['']
             hooks     = []
+            done      = [False]
 
             def _on_press(e):
+                if done[0]:
+                    return
                 keys_held.add(e.name)
                 combo = _fmt(keys_held)
                 best[0] = combo
-                sc_var.set(combo)          # affichage live
+                # thread-safe : màj tkinter depuis le thread principal
+                win.after(0, lambda c=combo: sc_var.set(c))
 
             def _on_release(e):
-                if best[0]:               # finalise dès le premier relâchement
-                    sc_var.set(best[0])
-                for h in hooks:
-                    try: kb.unhook(h)
-                    except Exception: pass
-                cap_btn.config(text="⌨ Capturer", state="normal", fg="white")
+                if done[0]:
+                    return
+                done[0] = True
+                final = best[0]
+                def _finish():
+                    if final:
+                        sc_var.set(final)
+                    for h in hooks:
+                        try: kb.unhook(h)
+                        except Exception: pass
+                    cap_btn.config(text="⌨ Capturer", state="normal", fg="white")
+                win.after(0, _finish)   # unhook + màj UI sur le thread tkinter
 
-            hooks.append(kb.on_press(_on_press))
-            hooks.append(kb.on_release(_on_release))
+            hooks.append(kb.on_press(_on_press,   suppress=False))
+            hooks.append(kb.on_release(_on_release, suppress=False))
 
         cap_btn = tk.Button(sc_row, text="⌨ Capturer", command=_capture,
                             bg="#2244aa", fg="white", bd=0, padx=6, font=("Segoe UI", 8))
