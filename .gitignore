@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+*.pyo
+.voice_modifier/
+*.egg-info/
+dist/
+build/
+.env
