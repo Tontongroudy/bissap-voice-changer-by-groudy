@@ -196,15 +196,15 @@ class SoundboardManager:
         ext = Path(path).suffix.lower()
         last_err = None
 
-        # 1. soundfile : WAV, OGG, FLAC, AIFF (ne supporte pas MP3 nativement)
-        if SF_OK and ext != '.mp3':
+        # 1. soundfile : WAV, OGG, FLAC, MP3, AIFF, etc.
+        if SF_OK:
             try:
                 data, sr = sf.read(path, dtype='float32', always_2d=False)
                 return data, sr
             except Exception as e:
                 last_err = e
 
-        # 2. Module wave intégré Python — WAV uniquement, aucune dépendance
+        # 4. Module wave intégré Python — WAV uniquement, aucune dépendance
         if ext == '.wav':
             try:
                 import wave, struct
@@ -223,7 +223,7 @@ class SoundboardManager:
             except Exception as e:
                 last_err = e
 
-        # 3. pygame.mixer.Sound + sndarray (WAV, OGG)
+        # 5. pygame.mixer.Sound + sndarray (WAV, OGG)
         if ext != '.mp3' and _ensure_mixer():
             try:
                 sound = _pygame.mixer.Sound(path)
@@ -237,7 +237,7 @@ class SoundboardManager:
             except Exception as e:
                 last_err = e
 
-        # 4. MP3 via pygame.mixer.music (joue sur périphérique défaut Windows)
+        # 6. MP3 via pygame.mixer.music (joue sur périphérique défaut Windows)
         if _ensure_mixer():
             try:
                 _pygame.mixer.music.load(path)
