@@ -633,31 +633,77 @@ class GrowlEffect(BaseEffect):
 
 
 class HeliumEffect(BaseEffect):
-    """Effet hélium / chipmunk — pitch + formants décalés vers le haut."""
+    """Effet hélium / chipmunk — resample_poly (smooth) + high-shelf IIR stateful."""
+
+    _XFADE = 64
 
     def __init__(self):
         super().__init__("Helium")
         self.params = {"amount": 0.5}
+        self._up = self._down = None
         self._last_amount = None
+        self._prev_tail   = None
+        self._sos         = None
+        self._zi          = None
+
+    def reset(self):
+        self._up = self._down = None
+        self._last_amount = None
+        self._prev_tail   = None
+        self._sos         = None
+        self._zi          = None
 
     def _process(self, audio, sr):
+        from fractions import Fraction
         amount = self.params["amount"]
-        n_steps = amount * 10.0
-        factor = 2.0 ** (n_steps / 12.0)
-        n_orig = len(audio)
-        pos = np.clip(np.arange(n_orig, dtype=np.float32) * factor, 0, n_orig - 1.001)
-        idx = pos.astype(np.int32)
-        pitched = (audio[idx] * (1 - (pos - idx)) + audio[np.minimum(idx + 1, n_orig - 1)] * (pos - idx)).astype(np.float32)
-        fd = rfft(pitched)
-        fl = len(fd)
-        out_fd = np.zeros(fl, dtype=complex)
-        fm_shift = 1.0 + amount * 0.6
-        indices = np.arange(fl)
-        src = (indices / fm_shift).astype(int)
-        valid = src < fl
-        out_fd[indices[valid]] = fd[src[valid]]
-        self._last_amount = amount
-        return irfft(out_fd, n=n_orig).astype(np.float32)
+        if amount < 0.01:
+            return audio
+
+        n_steps = amount * 10.0          # 0 → 10 demi-tons
+        factor  = 2.0 ** (n_steps / 12.0)
+        n = len(audio)
+
+        # ── Recalcul si amount a changé ──────────────────────────────
+        if self._last_amount != round(amount, 3):
+            frac = Fraction(factor).limit_denominator(100)
+            self._up, self._down = frac.numerator, frac.denominator
+            # High-shelf IIR (Audio EQ Cookbook) : booste les formants hauts
+            shelf_db = amount * 9.0
+            A  = 10 ** (shelf_db / 40.0)
+            fc = min(0.45, 2000.0 / (sr / 2))
+            w0 = 2 * np.pi * fc
+            alpha = np.sin(w0) / np.sqrt(2)  # shelf slope = 1
+            b0 =  A*((A+1) + (A-1)*np.cos(w0) + 2*np.sqrt(A)*alpha)
+            b1 = -2*A*((A-1) + (A+1)*np.cos(w0))
+            b2 =  A*((A+1) + (A-1)*np.cos(w0) - 2*np.sqrt(A)*alpha)
+            a0 =    (A+1) - (A-1)*np.cos(w0) + 2*np.sqrt(A)*alpha
+            a1 =  2*((A-1) - (A+1)*np.cos(w0))
+            a2 =    (A+1) - (A-1)*np.cos(w0) - 2*np.sqrt(A)*alpha
+            self._sos = np.array([[b0/a0, b1/a0, b2/a0, 1.0, a1/a0, a2/a0]])
+            self._zi  = None
+            self._last_amount = round(amount, 3)
+
+        # ── 1. Pitch shift via resample_poly ─────────────────────────
+        resampled = signal.resample_poly(audio, self._up, self._down)
+        if len(resampled) >= n:
+            pitched = resampled[:n].astype(np.float32)
+        else:
+            pitched = np.zeros(n, dtype=np.float32)
+            pitched[:len(resampled)] = resampled
+
+        # ── 2. Crossfade inter-blocs ──────────────────────────────────
+        xf = self._XFADE
+        if self._prev_tail is not None and len(self._prev_tail) == xf:
+            fade = np.linspace(0.0, 1.0, xf, dtype=np.float32)
+            pitched[:xf] = pitched[:xf] * fade + self._prev_tail * (1 - fade)
+        self._prev_tail = pitched[-xf:].copy()
+
+        # ── 3. Formant emphasis — high-shelf IIR stateful ────────────
+        if self._zi is None:
+            self._zi = signal.sosfilt_zi(self._sos) * pitched[0]
+        result, self._zi = signal.sosfilt(self._sos, pitched, zi=self._zi)
+
+        return np.clip(result.astype(np.float32), -1.0, 1.0)
 
 
 class TelephoneFilter(BaseEffect):
