@@ -406,9 +406,16 @@ class VoiceTab(tk.Frame):
         self.monitor_dev_var = tk.StringVar(value="Défaut")
         self.monitor_dev_menu = dev_menu(2, self.monitor_dev_var)
 
-        tk.Button(dev_frame, text="⟳ Appliquer", command=self._apply_devices,
+        btn_row_dev = tk.Frame(dev_frame, bg="#13131f")
+        btn_row_dev.grid(row=3, column=0, columnspan=2, pady=4)
+
+        tk.Button(btn_row_dev, text="⟳ Appliquer", command=self._apply_devices,
                   bg="#2244aa", fg="white", font=("Segoe UI", 8), bd=0, padx=6, pady=2
-                  ).grid(row=3, column=0, columnspan=2, pady=4)
+                  ).pack(side="left", padx=2)
+
+        self._audio_status = tk.Label(btn_row_dev, text="⏹ Arrêté", bg="#13131f",
+                                       fg="#ff6666", font=("Segoe UI", 8, "bold"))
+        self._audio_status.pack(side="left", padx=4)
 
         # Buffer size
         buf_frame = tk.LabelFrame(top, text=" Latence ", bg="#13131f", fg="#8888cc",
@@ -581,6 +588,13 @@ class VoiceTab(tk.Frame):
         self.app.audio_engine.output_device = idx_out
         self.app.audio_engine.monitor_device = idx_mon
         self.app.audio_engine.restart()
+        self._update_audio_status()
+
+    def _update_audio_status(self):
+        if self.app.audio_engine._running:
+            self._audio_status.config(text="▶ Actif", fg="#44ff88")
+        else:
+            self._audio_status.config(text="⏹ Arrêté", fg="#ff6666")
 
     def _show_routing_guide(self):
         win = tk.Toplevel(self)
@@ -720,13 +734,23 @@ class ProfilesTab(tk.Frame):
                                     font=("Segoe UI", 9), bd=1, relief="solid")
         list_frame.pack(side="left", fill="both", expand=True, padx=(0, 4))
 
+        lb_container = tk.Frame(list_frame, bg="#1a1a2e")
+        lb_container.pack(fill="both", expand=True, padx=4, pady=4)
+
+        lb_scroll = tk.Scrollbar(lb_container, orient="vertical")
+        lb_scroll.pack(side="right", fill="y")
+
         self._listbox = tk.Listbox(
-            list_frame, bg="#1a1a2e", fg="#ddddff", selectbackground="#2244aa",
-            font=("Segoe UI", 10), activestyle="none", bd=0, highlightthickness=0
+            lb_container, bg="#1a1a2e", fg="#ddddff", selectbackground="#2244aa",
+            font=("Segoe UI", 10), activestyle="none", bd=0, highlightthickness=0,
+            yscrollcommand=lb_scroll.set
         )
-        self._listbox.pack(fill="both", expand=True, padx=4, pady=4)
+        self._listbox.pack(side="left", fill="both", expand=True)
+        lb_scroll.config(command=self._listbox.yview)
         self._listbox.bind("<<ListboxSelect>>", self._on_select)
         self._listbox.bind("<Double-Button-1>", lambda e: self._load_selected())
+        self._listbox.bind("<MouseWheel>", lambda e: self._listbox.yview_scroll(
+            int(-1 * (e.delta / 120)), "units"))
 
         # Detail / shortcut panel
         detail_frame = tk.LabelFrame(content, text=" Détails du profil ", bg="#13131f",
@@ -940,7 +964,9 @@ class SoundboardTab(tk.Frame):
 
         def on_cfg(e):
             canvas.configure(scrollregion=canvas.bbox("all"))
+            canvas.itemconfig(cw, width=canvas.winfo_width())
         self._grid_frame.bind("<Configure>", on_cfg)
+        canvas.bind("<Configure>", lambda e: canvas.itemconfig(cw, width=e.width))
         canvas.bind_all("<MouseWheel>", lambda e: canvas.yview_scroll(int(-1 * (e.delta / 120)), "units"))
 
         self._build_grid()
@@ -953,10 +979,13 @@ class SoundboardTab(tk.Frame):
         for i, slot in enumerate(sb.slots):
             row, col = divmod(i, self.COLS)
             self._create_slot_widget(slot, row, col)
+        # Colonnes égales et extensibles
+        for c in range(self.COLS):
+            self._grid_frame.columnconfigure(c, weight=1, uniform="col")
 
     def _create_slot_widget(self, slot, row, col):
         frame = tk.Frame(self._grid_frame, bg=slot.color, bd=2, relief="raised",
-                         width=140, height=100)
+                         height=115)
         frame.grid(row=row, column=col, padx=4, pady=4, sticky="nsew")
         frame.grid_propagate(False)
 
@@ -1245,13 +1274,22 @@ class App:
         self.root.after(1000, self.profiles_tab.setup_all_hotkeys)
 
     def _start_audio(self):
-        self.audio_engine.start()
-        # Refresh device lists
-        self.root.after(300, self._refresh_devices)
+        # On ne démarre PAS le moteur audio automatiquement.
+        # L'audio démarre seulement quand l'utilisateur clique ⟳ Appliquer.
+        # Cela évite que l'app capture le micro dès l'ouverture.
+        self.root.after(200, self._refresh_devices)
 
     def _refresh_devices(self):
-        in_devs = self.audio_engine.get_input_devices()
-        out_devs = self.audio_engine.get_output_devices()
+        # Énumération des périphériques sans ouvrir de stream audio
+        try:
+            import sounddevice as sd
+            all_devs = sd.query_devices()
+            in_devs = [{"index": i, "name": d["name"]}
+                       for i, d in enumerate(all_devs) if d["max_input_channels"] > 0]
+            out_devs = [{"index": i, "name": d["name"]}
+                        for i, d in enumerate(all_devs) if d["max_output_channels"] > 0]
+        except Exception:
+            in_devs, out_devs = [], []
         self._in_device_map = {"Défaut": None, **{d["name"]: d["index"] for d in in_devs}}
         self._out_device_map = {"Défaut": None, **{d["name"]: d["index"] for d in out_devs}}
         self.voice_tab.refresh_devices(in_devs, out_devs)
