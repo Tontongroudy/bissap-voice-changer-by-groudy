@@ -50,47 +50,47 @@ class BaseEffect:
 # ──────────────────────────────────────────────────────────────────────────────
 
 class PitchShifter(BaseEffect):
-    """Pitch shifting via resample_poly + crossfade inter-blocs."""
-
-    _XFADE = 64
+    """Pitch shifting via resample_poly avec buffer continu (pas de silence entre blocs)."""
 
     def __init__(self):
         super().__init__("Pitch Shifter")
         self.params = {"semitones": 0.0}
-        self._prev_tail   = None
-        self._up = self._down = None
-        self._last_steps  = None
-
-    def reset(self):
-        self._prev_tail  = None
         self._up = self._down = None
         self._last_steps = None
+        self._buf = np.zeros(0, dtype=np.float32)
+
+    def reset(self):
+        self._up = self._down = None
+        self._last_steps = None
+        self._buf = np.zeros(0, dtype=np.float32)
 
     def _process(self, audio, sr):
         from fractions import Fraction
         n_steps = self.params["semitones"]
         if abs(n_steps) < 0.01:
             return audio
+        # factor > 1 = monte, < 1 = descend
+        # Pour monter (factor > 1) : moins d'échantillons en sortie
+        # → utiliser (1/factor) comme ratio resample_poly
         factor = 2.0 ** (n_steps / 12.0)
         n = len(audio)
 
         if self._last_steps != round(n_steps, 3):
+            # up/down = 1/factor : si factor > 1, up < down (moins d'éch. = plus aigu)
             frac = Fraction(factor).limit_denominator(100)
-            self._up, self._down = frac.numerator, frac.denominator
+            self._up, self._down = frac.denominator, frac.numerator  # inversé ↑
             self._last_steps = round(n_steps, 3)
+            self._buf = np.zeros(0, dtype=np.float32)
 
-        resampled = signal.resample_poly(audio, self._up, self._down)
-        if len(resampled) >= n:
-            output = resampled[:n].astype(np.float32)
+        resampled = signal.resample_poly(audio, self._up, self._down).astype(np.float32)
+        combined  = np.concatenate([self._buf, resampled])
+        if len(combined) >= n:
+            output    = combined[:n]
+            self._buf = combined[n:]
         else:
             output = np.zeros(n, dtype=np.float32)
-            output[:len(resampled)] = resampled
-
-        xf = self._XFADE
-        if self._prev_tail is not None and len(self._prev_tail) == xf:
-            fade_in = np.linspace(0.0, 1.0, xf, dtype=np.float32)
-            output[:xf] = output[:xf] * fade_in + self._prev_tail * (1.0 - fade_in)
-        self._prev_tail = output[-xf:].copy()
+            output[:len(combined)] = combined
+            self._buf = np.zeros(0, dtype=np.float32)
         return output
 
 
@@ -666,7 +666,7 @@ class HeliumEffect(BaseEffect):
         # ── Recalcul si amount a changé ──────────────────────────────
         if self._last_amount != round(amount, 3):
             frac = Fraction(factor).limit_denominator(100)
-            self._up, self._down = frac.numerator, frac.denominator
+            self._up, self._down = frac.denominator, frac.numerator  # inversé → voix aiguë
             # High-shelf IIR (Audio EQ Cookbook) : booste les formants hauts
             shelf_db = amount * 9.0
             A  = 10 ** (shelf_db / 40.0)

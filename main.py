@@ -789,22 +789,15 @@ class VoiceTab(tk.Frame):
         self.vu_out.grid(row=1, column=1, padx=4)
 
         # ── Prebuilts ─────────────────────────────────────────────────────
-        pre_lf = tk.LabelFrame(self, text=" ⚡ Voix prédéfinies ",
-                               bg="#13131f", fg="#ffcc44",
-                               font=("Segoe UI", 8, "bold"), bd=1, relief="solid")
-        pre_lf.pack(fill="x", padx=8, pady=(0, 4))
+        pre_outer = tk.Frame(self, bg="#13131f")
+        pre_outer.pack(fill="x", padx=8, pady=(0, 4))
 
-        _PREBUILTS = [
+        _ROW1 = [   # effets & neutres
             ("🎤 Normal",    []),
-            ("📉 Grave",     [("Pitch Shifter", {"semitones": -5.0}),
-                              ("Octave Doubler", {"octave": -1, "mix": 0.22})]),
-            ("📈 Aiguë",     [("Pitch Shifter", {"semitones":  5.0})]),
             ("🐭 Chipmunk",  [("Helium",        {"amount": 0.85})]),
+            ("📈 Aiguë",     [("Pitch Shifter", {"semitones":  5.0})]),
             ("🤖 Robot",     [("Ring Modulator", {"frequency": 90.0,  "mix": 0.85}),
                               ("Reverb",         {"room_size": 0.3, "damping": 0.4, "wet_dry": 0.2})]),
-            ("😈 Démon",     [("Pitch Shifter",  {"semitones": -8.0}),
-                              ("Growl",           {"drive": 4.0, "freq": 80.0, "mix": 0.6}),
-                              ("Reverb",          {"room_size": 0.6, "damping": 0.5, "wet_dry": 0.25})]),
             ("👽 Alien",     [("Pitch Shifter",  {"semitones": 4.0}),
                               ("Ring Modulator", {"frequency": 150.0, "mix": 0.55}),
                               ("Reverb",         {"room_size": 0.4, "damping": 0.4, "wet_dry": 0.2})]),
@@ -816,19 +809,35 @@ class VoiceTab(tk.Frame):
                               ("Whisper",         {"intensity": 0.7}),
                               ("Reverb",          {"room_size": 0.9, "damping": 0.3, "wet_dry": 0.5})]),
         ]
+        _ROW2 = [   # voix graves
+            ("📉 Grave",      [("Pitch Shifter", {"semitones": -4.0})]),
+            ("📉📉 Profond",   [("Pitch Shifter", {"semitones": -7.0}),
+                               ("Octave Doubler", {"octave": -1, "mix": 0.18})]),
+            ("🗿 Titan",      [("Pitch Shifter", {"semitones": -10.0}),
+                               ("Octave Doubler", {"octave": -1, "mix": 0.28})]),
+            ("😈 Démon",      [("Pitch Shifter", {"semitones": -8.0}),
+                               ("Growl",          {"drive": 4.0, "freq": 80.0, "mix": 0.6}),
+                               ("Reverb",         {"room_size": 0.6, "damping": 0.5, "wet_dry": 0.25})]),
+            ("🐉 Dragon",     [("Pitch Shifter", {"semitones": -6.0}),
+                               ("Distortion",     {"drive": 3.0, "tone": 0.3, "mix": 0.4}),
+                               ("Reverb",         {"room_size": 0.7, "damping": 0.4, "wet_dry": 0.3})]),
+            ("🌑 Abyssal",    [("Pitch Shifter", {"semitones": -12.0}),
+                               ("Growl",          {"drive": 6.0, "freq": 60.0, "mix": 0.7}),
+                               ("Reverb",         {"room_size": 0.9, "damping": 0.6, "wet_dry": 0.4})]),
+        ]
+
         self._active_preset_btn = None
 
-        def _make_preset_btn(parent, label, cfg):
-            is_normal = (label == "🎤 Normal")
+        def _make_preset_btn(parent, label, cfg, row2=False):
             btn = tk.Button(
                 parent, text=label,
-                bg="#1a1a2e" if is_normal else "#1c1c2e",
-                fg="#ffcc44" if is_normal else "#ccccff",
+                bg="#1a1a2e" if label == "🎤 Normal" else ("#1e1228" if row2 else "#1c1c2e"),
+                fg="#ffcc44" if label == "🎤 Normal" else ("#ff8866" if row2 else "#ccccff"),
                 activebackground="#2a2a4a", activeforeground="white",
                 font=("Segoe UI", 8), bd=0, padx=6, pady=3,
                 cursor="hand2", relief="flat",
             )
-            def _on_click(c=cfg, b=btn, lbl=label):
+            def _on_click(c=cfg, b=btn):
                 if self._active_preset_btn and self._active_preset_btn.winfo_exists():
                     self._active_preset_btn.config(relief="flat", bd=0)
                 b.config(relief="solid", bd=1)
@@ -837,8 +846,19 @@ class VoiceTab(tk.Frame):
             btn.config(command=_on_click)
             return btn
 
-        for label, cfg in _PREBUILTS:
-            _make_preset_btn(pre_lf, label, cfg).pack(side="left", padx=2, pady=4)
+        row1_lf = tk.LabelFrame(pre_outer, text=" ⚡ Effets ",
+                                bg="#13131f", fg="#aaaaff",
+                                font=("Segoe UI", 8, "bold"), bd=1, relief="solid")
+        row1_lf.pack(fill="x", pady=(0, 2))
+        for label, cfg in _ROW1:
+            _make_preset_btn(row1_lf, label, cfg).pack(side="left", padx=2, pady=3)
+
+        row2_lf = tk.LabelFrame(pre_outer, text=" 🔉 Voix graves ",
+                                bg="#13131f", fg="#ff8866",
+                                font=("Segoe UI", 8, "bold"), bd=1, relief="solid")
+        row2_lf.pack(fill="x")
+        for label, cfg in _ROW2:
+            _make_preset_btn(row2_lf, label, cfg, row2=True).pack(side="left", padx=2, pady=3)
 
         # ── Scrollable effects area ────────────────────────────────────
         effects_outer = tk.Frame(self, bg="#13131f")
