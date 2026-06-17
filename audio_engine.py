@@ -127,14 +127,23 @@ class AudioEngine:
                 self._in_level = float(np.sqrt(np.mean(audio ** 2)))
 
             if self.effects_chain:
-                processed = self.effects_chain.process(audio, sr)
+                try:
+                    processed = self.effects_chain.process(audio, sr)
+                except Exception as e:
+                    print(f"[AudioEngine] Effects chain error: {e}")
+                    processed = audio.copy()
             else:
                 processed = audio.copy()
 
-            processed = np.clip(processed * self.output_volume, -1.0, 1.0).astype(np.float32)
+            # Remplace NaN/Inf (effet planté) par 0 pour ne pas tuer le stream
+            if not np.isfinite(processed).all():
+                processed = np.where(np.isfinite(processed), processed, 0.0)
 
+            # OUT VU = niveau du signal traité, indépendant du volume de sortie
             with self._level_lock:
                 self._out_level = float(np.sqrt(np.mean(processed ** 2)))
+
+            processed = np.clip(processed * self.output_volume, -1.0, 1.0).astype(np.float32)
 
             chunk = processed.copy()
             _push(self._audio_q,   chunk)
