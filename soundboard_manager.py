@@ -79,6 +79,7 @@ class SoundboardManager:
             self.stop_all()
 
         def _play():
+            # Essai 1 : Sound (WAV, OGG, parfois MP3 selon la plateforme)
             try:
                 sound = pygame.mixer.Sound(slot.file_path)
                 sound.set_volume(slot.volume)
@@ -86,8 +87,17 @@ class SoundboardManager:
                 if ch:
                     with self._lock:
                         self._active_channels[index] = ch
+                return
+            except Exception:
+                pass
+
+            # Fallback MP3 : pygame.mixer.music (un seul fichier à la fois)
+            try:
+                pygame.mixer.music.load(slot.file_path)
+                pygame.mixer.music.set_volume(slot.volume)
+                pygame.mixer.music.play()
             except Exception as e:
-                print(f"[Soundboard] Erreur lecture slot {index}: {e}")
+                print(f"[Soundboard] Impossible de lire '{slot.file_path}': {e}")
 
         threading.Thread(target=_play, daemon=True).start()
 
