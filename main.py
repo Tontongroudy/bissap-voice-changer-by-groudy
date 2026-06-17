@@ -1578,65 +1578,85 @@ class SoundboardTab(tk.Frame):
         self._build_grid()
         self.register_all_hotkeys()
 
+    # ── Hotkeys globaux soundboard ──────────────────────────────────────
+    # Utilise on_press/on_release avec suivi manuel des touches enfoncées
+    # (add_hotkey est instable pour les combinaisons sur Windows)
+
+    _sb_pressed: set  = set()   # touches actuellement enfoncées (partagé entre instances)
+    _sb_map: dict     = {}      # frozenset de touches normalisées → index de slot
+    _sb_hooks: list   = []      # handles kb.on_press / kb.on_release actifs
+
     @staticmethod
-    def _normalize_sc(sc: str) -> str:
-        """Normalise 'left ctrl+right shift+1' → 'ctrl+shift+1'."""
-        mods, rest = [], []
-        for p in sc.lower().split('+'):
-            p = p.strip().replace('left ', '').replace('right ', '')
-            if p in ('ctrl', 'control'):
-                if 'ctrl' not in mods: mods.append('ctrl')
-            elif p == 'shift':
-                if 'shift' not in mods: mods.append('shift')
-            elif p in ('alt', 'altgr'):
-                if 'alt' not in mods: mods.append('alt')
-            else:
-                rest.append(p)
-        return '+'.join(mods + rest)
+    def _norm_key(name: str) -> str:
+        """Normalise un nom de touche : 'left ctrl' → 'ctrl', etc."""
+        n = name.lower().strip()
+        if n in ('left ctrl', 'right ctrl', 'ctrl', 'control', 'left control', 'right control'):
+            return 'ctrl'
+        if n in ('left shift', 'right shift', 'shift'):
+            return 'shift'
+        if n in ('left alt', 'right alt', 'alt', 'altgr'):
+            return 'alt'
+        return n
+
+    @staticmethod
+    def _sc_to_frozenset(sc: str) -> frozenset:
+        return frozenset(SoundboardTab._norm_key(p) for p in sc.split('+') if p.strip())
 
     def register_all_hotkeys(self):
-        """Enregistre (ou re-enregistre) tous les raccourcis globaux du soundboard."""
+        """Construit la table hotkey → slot et (ré)installe les hooks globaux."""
         if not KB_OK:
             return
-        # Désinscrire les anciens
-        for sc in list(self._hotkeys.values()):
+
+        # Retirer les vieux hooks
+        for h in SoundboardTab._sb_hooks:
             try:
-                kb.remove_hotkey(sc)
+                kb.unhook(h)
             except Exception:
                 pass
-        self._hotkeys.clear()
+        SoundboardTab._sb_hooks.clear()
+        SoundboardTab._sb_map.clear()
+        SoundboardTab._sb_pressed.clear()
 
+        # Construire la table
         for slot in self.app.soundboard_manager.slots:
             raw = slot.shortcut.strip()
             if not raw:
                 continue
-            sc = self._normalize_sc(raw)
-            try:
-                idx = slot.index
-                kb.add_hotkey(sc, lambda i=idx: self._hotkey_play(i), suppress=False)
-                self._hotkeys[idx] = sc
-                print(f"[Soundboard] Hotkey '{sc}' → slot {idx + 1}")
-            except Exception as e:
-                print(f"[Soundboard] Impossible d'enregistrer '{sc}': {e}")
+            fs = self._sc_to_frozenset(raw)
+            SoundboardTab._sb_map[fs] = slot.index
+            print(f"[Soundboard] Hotkey {set(fs)} → slot {slot.index + 1}")
 
-    def _hotkey_play(self, index: int):
-        """Callback hotkey global — thread-safe, joue le slot."""
-        def _do():
-            sb = self.app.soundboard_manager
-            # Fallback device : si speakers_device non configuré, utiliser le défaut système
-            if sb.speakers_device is None:
-                import sounddevice as _sd
+        if not SoundboardTab._sb_map:
+            return
+
+        app_ref = self.app
+
+        def _on_press(e):
+            SoundboardTab._sb_pressed.add(SoundboardTab._norm_key(e.name))
+            cur = frozenset(SoundboardTab._sb_pressed)
+            if cur in SoundboardTab._sb_map:
+                idx = SoundboardTab._sb_map[cur]
                 try:
+                    app_ref.root.after(0, lambda i=idx: _play_slot(i))
+                except Exception:
+                    _play_slot(idx)
+
+        def _on_release(e):
+            SoundboardTab._sb_pressed.discard(SoundboardTab._norm_key(e.name))
+
+        def _play_slot(index: int):
+            sb = app_ref.soundboard_manager
+            if sb.speakers_device is None:
+                try:
+                    import sounddevice as _sd
                     default_out = _sd.default.device[1]
                     sb.speakers_device = default_out if default_out >= 0 else None
                 except Exception:
                     pass
             sb.play(index)
-        # Planifier dans le thread tkinter pour la sécurité
-        try:
-            self.app.root.after(0, _do)
-        except Exception:
-            _do()
+
+        SoundboardTab._sb_hooks.append(kb.on_press(_on_press,   suppress=False))
+        SoundboardTab._sb_hooks.append(kb.on_release(_on_release, suppress=False))
 
 
 # ──────────────────────────────────────────────────────────────────────────────
