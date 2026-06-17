@@ -1,4 +1,4 @@
-# Voice Modifier Pro
+# Bissap Voice Changer by Groudy
 
 Modificateur de voix en temps réel avec soundboard, pour Windows.
 

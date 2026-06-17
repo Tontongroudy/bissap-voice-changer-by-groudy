@@ -1,4 +1,4 @@
-# Tutoriel — Voice Modifier Pro
+# Tutoriel — Bissap Voice Changer by Groudy
 
 ## Sommaire
 
@@ -47,7 +47,7 @@ C'est le **câble audio virtuel** qui permet à Discord, Teams, OBS, etc. de cap
 6. **Redémarrer Windows** (obligatoire)
 
 Après redémarrage, deux nouveaux périphériques apparaissent dans Windows :
-- **CABLE Input (VB-Audio Virtual Cable)** — entrée du câble (ce que Voice Modifier Pro envoie)
+- **CABLE Input (VB-Audio Virtual Cable)** — entrée du câble (ce que Bissap Voice Changer by Groudy envoie)
 - **CABLE Output (VB-Audio Virtual Cable)** — sortie du câble (ce que Discord/Teams reçoit)
 
 ---
@@ -106,7 +106,7 @@ Cliquer **⟳ Appliquer**.
 Votre micro
     │
     ▼
-Voice Modifier Pro  ──(effets DSP)──►  CABLE Input  ──►  CABLE Output  ──►  Discord / Teams / OBS
+Bissap Voice Changer by Groudy  ──(effets DSP)──►  CABLE Input  ──►  CABLE Output  ──►  Discord / Teams / OBS
                                                                          
     │ (optionnel)
     ▼

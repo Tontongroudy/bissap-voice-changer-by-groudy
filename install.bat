@@ -1,5 +1,5 @@
 @echo off
-title Installation - Voice Modifier Pro
+title Installation - Bissap Voice Changer by Groudy
 echo Installation des dependances...
 pip install numpy scipy customtkinter keyboard soundfile sounddevice
 echo.
