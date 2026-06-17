@@ -31,7 +31,7 @@ class AudioEngine:
 
     def __init__(self):
         self.sample_rate = 44100
-        self.buffer_size = 1024
+        self.buffer_size = 2048
         self.channels = 1
 
         self.input_device = None    # index du micro réel
