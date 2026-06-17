@@ -633,72 +633,31 @@ class GrowlEffect(BaseEffect):
 
 
 class HeliumEffect(BaseEffect):
-    """Effet hélium — pitch shift (resample_poly) + formant shift (FFT+fenêtre Hann)."""
-
-    _XFADE = 128
+    """Effet hélium / chipmunk — pitch + formants décalés vers le haut."""
 
     def __init__(self):
         super().__init__("Helium")
         self.params = {"amount": 0.5}
-        self._prev_tail = None
-        self._window    = None
-        self._up = self._down = None
-        self._last_factor = None
-
-    def reset(self):
-        self._prev_tail = None
-        self._window    = None
-        self._up = self._down = None
-        self._last_factor = None
+        self._last_amount = None
 
     def _process(self, audio, sr):
-        from fractions import Fraction
-
-        amount = max(0.0, min(1.0, self.params["amount"]))
-        if amount < 0.01:
-            return audio
-
-        factor = 2.0 ** (amount * 10.0 / 12.0)
-        n = len(audio)
-
-        # ── 1. Pitch shift via resample_poly (FIR polyphase, pas d'artefact de répétition)
-        factor_key = round(factor, 5)
-        if self._last_factor != factor_key:
-            frac = Fraction(factor).limit_denominator(50)
-            self._up, self._down = frac.numerator, frac.denominator
-            self._last_factor = factor_key
-
-        resampled = signal.resample_poly(audio, self._up, self._down)
-        if len(resampled) >= n:
-            pitched = resampled[:n].astype(np.float32)
-        else:
-            pitched = np.zeros(n, dtype=np.float32)
-            pitched[:len(resampled)] = resampled
-
-        # ── 2. Formant shift via FFT avec fenêtre Hann
-        #      La fenêtre force les bords à 0 → élimine la fuite spectrale inter-blocs
-        if self._window is None or len(self._window) != n:
-            self._window = np.hanning(n).astype(np.float32)
-
+        amount = self.params["amount"]
+        n_steps = amount * 10.0
+        factor = 2.0 ** (n_steps / 12.0)
+        n_orig = len(audio)
+        pos = np.clip(np.arange(n_orig, dtype=np.float32) * factor, 0, n_orig - 1.001)
+        idx = pos.astype(np.int32)
+        pitched = (audio[idx] * (1 - (pos - idx)) + audio[np.minimum(idx + 1, n_orig - 1)] * (pos - idx)).astype(np.float32)
+        fd = rfft(pitched)
+        fl = len(fd)
+        out_fd = np.zeros(fl, dtype=complex)
         fm_shift = 1.0 + amount * 0.6
-        fd      = rfft(pitched * self._window)
-        fl      = len(fd)
-        out_fd  = np.zeros(fl, dtype=complex)
         indices = np.arange(fl)
-        src_idx = (indices / fm_shift).astype(int)
-        valid   = src_idx < fl
-        out_fd[indices[valid]] = fd[src_idx[valid]]
-        # ×2 pour compenser l'atténuation de la fenêtre Hann (gain moyen = 0.5)
-        formanted = irfft(out_fd, n=n).astype(np.float32) * 2.0
-
-        # ── 3. Crossfade avec la queue du bloc précédent pour lisser les bords de fenêtre
-        xf = self._XFADE
-        if self._prev_tail is not None and len(self._prev_tail) == xf:
-            fade_in = np.linspace(0.0, 1.0, xf, dtype=np.float32)
-            formanted[:xf] = formanted[:xf] * fade_in + self._prev_tail * (1.0 - fade_in)
-        self._prev_tail = formanted[-xf:].copy()
-
-        return np.clip(formanted, -1.0, 1.0).astype(np.float32)
+        src = (indices / fm_shift).astype(int)
+        valid = src < fl
+        out_fd[indices[valid]] = fd[src[valid]]
+        self._last_amount = amount
+        return irfft(out_fd, n=n_orig).astype(np.float32)
 
 
 class TelephoneFilter(BaseEffect):
