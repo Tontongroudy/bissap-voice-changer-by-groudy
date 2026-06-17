@@ -788,6 +788,58 @@ class VoiceTab(tk.Frame):
         self.vu_out = VUMeter(vu_frame, width=24, height=80)
         self.vu_out.grid(row=1, column=1, padx=4)
 
+        # ── Prebuilts ─────────────────────────────────────────────────────
+        pre_lf = tk.LabelFrame(self, text=" ⚡ Voix prédéfinies ",
+                               bg="#13131f", fg="#ffcc44",
+                               font=("Segoe UI", 8, "bold"), bd=1, relief="solid")
+        pre_lf.pack(fill="x", padx=8, pady=(0, 4))
+
+        _PREBUILTS = [
+            ("🎤 Normal",    []),
+            ("📉 Grave",     [("Pitch Shifter", {"semitones": -5.0}),
+                              ("Octave Doubler", {"octave": -1, "mix": 0.22})]),
+            ("📈 Aiguë",     [("Pitch Shifter", {"semitones":  5.0})]),
+            ("🐭 Chipmunk",  [("Helium",        {"amount": 0.85})]),
+            ("🤖 Robot",     [("Ring Modulator", {"frequency": 90.0,  "mix": 0.85}),
+                              ("Reverb",         {"room_size": 0.3, "damping": 0.4, "wet_dry": 0.2})]),
+            ("😈 Démon",     [("Pitch Shifter",  {"semitones": -8.0}),
+                              ("Growl",           {"drive": 4.0, "freq": 80.0, "mix": 0.6}),
+                              ("Reverb",          {"room_size": 0.6, "damping": 0.5, "wet_dry": 0.25})]),
+            ("👽 Alien",     [("Pitch Shifter",  {"semitones": 4.0}),
+                              ("Ring Modulator", {"frequency": 150.0, "mix": 0.55}),
+                              ("Reverb",         {"room_size": 0.4, "damping": 0.4, "wet_dry": 0.2})]),
+            ("📞 Tél.",      [("Telephone Filter", {"low_cut": 300.0, "high_cut": 3400.0, "distortion": 0.3})]),
+            ("📻 Radio",     [("Radio Effect",   {"noise_level": 0.04, "bandwidth": 0.5})]),
+            ("🌊 Sous-marin",[("Underwater",     {"depth": 0.8, "wobble": 0.4, "wobble_rate": 2.0})]),
+            ("📢 Mégaphone", [("Megaphone",      {"drive": 8.0, "mid_boost_db": 10.0})]),
+            ("👻 Fantôme",   [("Pitch Shifter",  {"semitones": -3.0}),
+                              ("Whisper",         {"intensity": 0.7}),
+                              ("Reverb",          {"room_size": 0.9, "damping": 0.3, "wet_dry": 0.5})]),
+        ]
+        self._active_preset_btn = None
+
+        def _make_preset_btn(parent, label, cfg):
+            is_normal = (label == "🎤 Normal")
+            btn = tk.Button(
+                parent, text=label,
+                bg="#1a1a2e" if is_normal else "#1c1c2e",
+                fg="#ffcc44" if is_normal else "#ccccff",
+                activebackground="#2a2a4a", activeforeground="white",
+                font=("Segoe UI", 8), bd=0, padx=6, pady=3,
+                cursor="hand2", relief="flat",
+            )
+            def _on_click(c=cfg, b=btn, lbl=label):
+                if self._active_preset_btn and self._active_preset_btn.winfo_exists():
+                    self._active_preset_btn.config(relief="flat", bd=0)
+                b.config(relief="solid", bd=1)
+                self._active_preset_btn = b
+                self._apply_preset(c)
+            btn.config(command=_on_click)
+            return btn
+
+        for label, cfg in _PREBUILTS:
+            _make_preset_btn(pre_lf, label, cfg).pack(side="left", padx=2, pady=4)
+
         # ── Scrollable effects area ────────────────────────────────────
         effects_outer = tk.Frame(self, bg="#13131f")
         effects_outer.pack(fill="both", expand=True, padx=8, pady=4)
@@ -1056,6 +1108,22 @@ class VoiceTab(tk.Frame):
                     break
         if saved_mon and saved_mon in all_out_labels:
             self.monitor_dev_var.set(saved_mon)
+
+    def _apply_preset(self, effects_config: list):
+        """Désactive tout puis active les effets du preset avec leurs paramètres."""
+        chain = self.app.effects_chain
+        with chain._lock:
+            for e in chain.effects:
+                e.enabled = False
+            for name, params in effects_config:
+                for e in chain.effects:
+                    if e.name == name:
+                        e.enabled = True
+                        for k, v in params.items():
+                            if k in e.params:
+                                e.params[k] = v
+                        break
+        self.sync_from_chain()
 
     def sync_from_chain(self):
         """Synchronise les widgets UI depuis la chaîne d'effets (chargement profil)."""
