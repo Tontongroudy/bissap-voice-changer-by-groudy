@@ -172,7 +172,8 @@ class ParamSlider(tk.Frame):
     """Slider + label + saisie numérique directe."""
 
     def __init__(self, parent, label: str, from_: float, to: float,
-                 initial: float, on_change: callable, fmt: str = ".2f", **kw):
+                 initial: float, on_change: callable, fmt: str = ".2f",
+                 desc: str = "", **kw):
         super().__init__(parent, bg="#1e1e2e", **kw)
         self._on_change = on_change
         self._from = from_
@@ -205,6 +206,10 @@ class ParamSlider(tk.Frame):
         self._entry.bind("<Return>", self._entry_changed)
         self._entry.bind("<FocusOut>", self._entry_changed)
 
+        if desc:
+            tk.Label(self, text=desc, bg="#1e1e2e", fg="#555577",
+                     font=("Segoe UI", 7, "italic")).pack(side="left", padx=(6, 0))
+
     def _slider_moved(self, val):
         try:
             v = float(val)
@@ -234,138 +239,138 @@ class ParamSlider(tk.Frame):
 
 EFFECT_PARAMS_META = {
     "Pitch Shifter": [
-        ("semitones", "Demi-tons", -24.0, 24.0, ".1f"),
+        ("semitones", "Demi-tons", -24.0, 24.0, ".1f", "Monte ou descend la voix en demi-tons (12 = 1 octave)"),
     ],
     "Formant Shifter": [
-        ("shift", "Décalage formants", -2.0, 2.0, ".2f"),
+        ("shift", "Décalage formants", -2.0, 2.0, ".2f", "Change la couleur de la voix sans changer la note"),
     ],
     "Vibrato": [
-        ("rate", "Vitesse (Hz)", 0.1, 20.0, ".1f"),
-        ("depth", "Profondeur (ms)", 0.1, 20.0, ".1f"),
+        ("rate", "Vitesse (Hz)", 0.1, 20.0, ".1f", "Rapidité du tremblement de voix"),
+        ("depth", "Profondeur (ms)", 0.1, 20.0, ".1f", "Amplitude du tremblement"),
     ],
     "Tremolo": [
-        ("rate", "Vitesse (Hz)", 0.1, 20.0, ".1f"),
-        ("depth", "Profondeur", 0.0, 1.0, ".2f"),
+        ("rate", "Vitesse (Hz)", 0.1, 20.0, ".1f", "Rapidité du pulsement du volume"),
+        ("depth", "Profondeur", 0.0, 1.0, ".2f", "Intensité du pulsement (0 = rien, 1 = coupures franches)"),
     ],
     "Octave Doubler": [
-        ("octave", "Octave (-1/+1)", -1.0, 1.0, ".0f"),
-        ("mix", "Mix", 0.0, 1.0, ".2f"),
+        ("octave", "Octave (-1/+1)", -1.0, 1.0, ".0f", "-1 = ajoute une voix grave en dessous, +1 = voix aiguë"),
+        ("mix", "Mix", 0.0, 1.0, ".2f", "Dosage entre voix originale et voix dupliquée"),
     ],
     "Echo": [
-        ("delay_ms", "Délai (ms)", 1.0, 2000.0, ".0f"),
-        ("feedback", "Feedback", 0.0, 0.95, ".2f"),
-        ("mix", "Mix Wet", 0.0, 1.0, ".2f"),
+        ("delay_ms", "Délai (ms)", 1.0, 2000.0, ".0f", "Temps avant que l'écho revienne (ms)"),
+        ("feedback", "Feedback", 0.0, 0.95, ".2f", "Combien d'échos s'enchaînent (0 = 1 seul, 0.9 = longue traîne)"),
+        ("mix", "Mix Wet", 0.0, 1.0, ".2f", "Volume de l'écho par rapport à la voix originale"),
     ],
     "Reverb": [
-        ("room_size", "Taille salle", 0.0, 1.0, ".2f"),
-        ("damping", "Damping", 0.0, 1.0, ".2f"),
-        ("wet_dry", "Wet/Dry", 0.0, 1.0, ".2f"),
+        ("room_size", "Taille salle", 0.0, 1.0, ".2f", "0 = petite pièce, 1 = grande cathédrale"),
+        ("damping", "Damping", 0.0, 1.0, ".2f", "Absorption des hautes fréquences (1 = reverb sombre)"),
+        ("wet_dry", "Wet/Dry", 0.0, 1.0, ".2f", "Dosage reverb / voix sèche"),
     ],
     "Chorus": [
-        ("voices", "Voix", 1.0, 8.0, ".0f"),
-        ("depth", "Profondeur (ms)", 0.1, 30.0, ".1f"),
-        ("rate", "Vitesse (Hz)", 0.1, 10.0, ".1f"),
-        ("mix", "Mix", 0.0, 1.0, ".2f"),
+        ("voices", "Voix", 1.0, 8.0, ".0f", "Nombre de copies légèrement désaccordées de ta voix"),
+        ("depth", "Profondeur (ms)", 0.1, 30.0, ".1f", "Amplitude du désaccordage entre les voix"),
+        ("rate", "Vitesse (Hz)", 0.1, 10.0, ".1f", "Rapidité du mouvement entre les voix"),
+        ("mix", "Mix", 0.0, 1.0, ".2f", "Dosage effet / voix sèche"),
     ],
     "Flanger": [
-        ("delay_ms", "Délai (ms)", 0.1, 20.0, ".1f"),
-        ("depth", "Profondeur", 0.0, 1.0, ".2f"),
-        ("feedback", "Feedback", -0.9, 0.9, ".2f"),
-        ("rate", "Vitesse LFO (Hz)", 0.01, 10.0, ".2f"),
-        ("mix", "Mix", 0.0, 1.0, ".2f"),
+        ("delay_ms", "Délai (ms)", 0.1, 20.0, ".1f", "Durée du délai de base (court = effet jet)"),
+        ("depth", "Profondeur", 0.0, 1.0, ".2f", "Amplitude de la modulation du délai"),
+        ("feedback", "Feedback", -0.9, 0.9, ".2f", "Réinjection du signal (négatif = inverse)"),
+        ("rate", "Vitesse LFO (Hz)", 0.01, 10.0, ".2f", "Vitesse de balayage du délai"),
+        ("mix", "Mix", 0.0, 1.0, ".2f", "Dosage effet / voix sèche"),
     ],
     "Phaser": [
-        ("stages", "Étages", 2.0, 12.0, ".0f"),
-        ("rate", "Vitesse (Hz)", 0.01, 10.0, ".2f"),
-        ("depth", "Profondeur", 0.0, 1.0, ".2f"),
-        ("mix", "Mix", 0.0, 1.0, ".2f"),
+        ("stages", "Étages", 2.0, 12.0, ".0f", "Nombre de filtres en cascade (plus = effet plus prononcé)"),
+        ("rate", "Vitesse (Hz)", 0.01, 10.0, ".2f", "Rapidité du balayage de fréquence"),
+        ("depth", "Profondeur", 0.0, 1.0, ".2f", "Amplitude du balayage"),
+        ("mix", "Mix", 0.0, 1.0, ".2f", "Dosage effet / voix sèche"),
     ],
     "Multi-Tap Delay": [
-        ("tap1_delay", "Tap 1 (ms)", 1.0, 2000.0, ".0f"),
-        ("tap1_level", "Tap 1 Niveau", 0.0, 1.0, ".2f"),
-        ("tap2_delay", "Tap 2 (ms)", 1.0, 2000.0, ".0f"),
-        ("tap2_level", "Tap 2 Niveau", 0.0, 1.0, ".2f"),
-        ("tap3_delay", "Tap 3 (ms)", 1.0, 2000.0, ".0f"),
-        ("tap3_level", "Tap 3 Niveau", 0.0, 1.0, ".2f"),
-        ("tap4_delay", "Tap 4 (ms)", 1.0, 2000.0, ".0f"),
-        ("tap4_level", "Tap 4 Niveau", 0.0, 1.0, ".2f"),
-        ("mix", "Mix", 0.0, 1.0, ".2f"),
+        ("tap1_delay", "Tap 1 (ms)", 1.0, 2000.0, ".0f", "Temps du 1er écho"),
+        ("tap1_level", "Tap 1 Niveau", 0.0, 1.0, ".2f", "Volume du 1er écho"),
+        ("tap2_delay", "Tap 2 (ms)", 1.0, 2000.0, ".0f", "Temps du 2e écho"),
+        ("tap2_level", "Tap 2 Niveau", 0.0, 1.0, ".2f", "Volume du 2e écho"),
+        ("tap3_delay", "Tap 3 (ms)", 1.0, 2000.0, ".0f", "Temps du 3e écho"),
+        ("tap3_level", "Tap 3 Niveau", 0.0, 1.0, ".2f", "Volume du 3e écho"),
+        ("tap4_delay", "Tap 4 (ms)", 1.0, 2000.0, ".0f", "Temps du 4e écho"),
+        ("tap4_level", "Tap 4 Niveau", 0.0, 1.0, ".2f", "Volume du 4e écho"),
+        ("mix", "Mix", 0.0, 1.0, ".2f", "Volume global des échos"),
     ],
     "Distortion": [
-        ("drive", "Drive", 1.0, 100.0, ".1f"),
-        ("tone", "Tone", 0.0, 1.0, ".2f"),
-        ("mix", "Mix", 0.0, 1.0, ".2f"),
+        ("drive", "Drive", 1.0, 100.0, ".1f", "Intensité de la saturation (1 = propre, 100 = très saturé)"),
+        ("tone", "Tone", 0.0, 1.0, ".2f", "Couleur : 0 = sombre/filtré, 1 = brillant/direct"),
+        ("mix", "Mix", 0.0, 1.0, ".2f", "Dosage distorsion / voix sèche"),
     ],
     "Bitcrusher": [
-        ("bits", "Bits (résolution)", 2.0, 16.0, ".1f"),
-        ("rate_reduction", "Réduction SR", 1.0, 32.0, ".0f"),
+        ("bits", "Bits (résolution)", 2.0, 16.0, ".1f", "Résolution audio : 16 = qualité CD, 4 = son 8-bit rétro"),
+        ("rate_reduction", "Réduction SR", 1.0, 32.0, ".0f", "Réduit la fréquence d'échantillonnage (effet lo-fi)"),
     ],
     "Ring Modulator": [
-        ("frequency", "Fréquence (Hz)", 1.0, 2000.0, ".0f"),
-        ("mix", "Mix", 0.0, 1.0, ".2f"),
+        ("frequency", "Fréquence (Hz)", 1.0, 2000.0, ".0f", "Fréquence de la porteuse (100 Hz = son robotique)"),
+        ("mix", "Mix", 0.0, 1.0, ".2f", "Dosage effet / voix sèche"),
     ],
     "Vocoder": [
-        ("bands", "Bandes", 4.0, 32.0, ".0f"),
-        ("mix", "Mix", 0.0, 1.0, ".2f"),
+        ("bands", "Bandes", 4.0, 32.0, ".0f", "Nombre de bandes de fréquences analysées (plus = plus précis)"),
+        ("mix", "Mix", 0.0, 1.0, ".2f", "Dosage vocoder / voix sèche"),
     ],
     "Whisper": [
-        ("intensity", "Intensité", 0.0, 1.0, ".2f"),
+        ("intensity", "Intensité", 0.0, 1.0, ".2f", "Force du chuchotement (1 = presque inaudible mais sibilant)"),
     ],
     "Growl": [
-        ("drive", "Drive", 1.0, 20.0, ".1f"),
-        ("freq", "Fréquence (Hz)", 20.0, 300.0, ".0f"),
-        ("mix", "Mix", 0.0, 1.0, ".2f"),
+        ("drive", "Drive", 1.0, 20.0, ".1f", "Intensité des harmoniques graves"),
+        ("freq", "Fréquence (Hz)", 20.0, 300.0, ".0f", "Fréquence centrale du grognement (graves profonds)"),
+        ("mix", "Mix", 0.0, 1.0, ".2f", "Dosage growl / voix sèche"),
     ],
     "Helium": [
-        ("amount", "Intensité", 0.0, 1.0, ".2f"),
+        ("amount", "Intensité", 0.0, 1.0, ".2f", "Plus c'est haut, plus tu sonnes comme Alvin"),
     ],
     "Telephone Filter": [
-        ("low_cut", "Coupure basse (Hz)", 50.0, 1000.0, ".0f"),
-        ("high_cut", "Coupure haute (Hz)", 1000.0, 8000.0, ".0f"),
-        ("distortion", "Distorsion", 0.0, 1.0, ".2f"),
+        ("low_cut", "Coupure basse (Hz)", 50.0, 1000.0, ".0f", "Enlève les graves en dessous de cette fréquence"),
+        ("high_cut", "Coupure haute (Hz)", 1000.0, 8000.0, ".0f", "Enlève les aigus au-dessus de cette fréquence"),
+        ("distortion", "Distorsion", 0.0, 1.0, ".2f", "Ajoute la saturation caractéristique des vieilles lignes"),
     ],
     "Megaphone": [
-        ("drive", "Drive", 1.0, 30.0, ".1f"),
-        ("mid_boost_db", "Boost médium (dB)", 0.0, 20.0, ".1f"),
+        ("drive", "Drive", 1.0, 30.0, ".1f", "Intensité de la distorsion du mégaphone"),
+        ("mid_boost_db", "Boost médium (dB)", 0.0, 20.0, ".1f", "Amplifie les médiums (donne le côté creux du mégaphone)"),
     ],
     "Radio Effect": [
-        ("noise_level", "Niveau bruit", 0.0, 0.3, ".3f"),
-        ("bandwidth", "Largeur de bande", 0.0, 1.0, ".2f"),
+        ("noise_level", "Niveau bruit", 0.0, 0.3, ".3f", "Quantité de grésil radio en fond"),
+        ("bandwidth", "Largeur de bande", 0.0, 1.0, ".2f", "0 = bande très étroite (AM), 1 = plus large (FM)"),
     ],
     "Underwater": [
-        ("depth", "Profondeur", 0.0, 1.0, ".2f"),
-        ("wobble", "Wobble", 0.0, 1.0, ".2f"),
-        ("wobble_rate", "Vitesse wobble (Hz)", 0.1, 10.0, ".1f"),
+        ("depth", "Profondeur", 0.0, 1.0, ".2f", "0 = surface, 1 = fond (coupe de plus en plus les aigus)"),
+        ("wobble", "Wobble", 0.0, 1.0, ".2f", "Intensité du mouvement aquatique du volume"),
+        ("wobble_rate", "Vitesse wobble (Hz)", 0.1, 10.0, ".1f", "Rapidité des vagues sonores"),
     ],
     "Low-Pass Filter": [
-        ("cutoff", "Coupure (Hz)", 20.0, 20000.0, ".0f"),
-        ("resonance", "Résonance (Q)", 0.1, 10.0, ".2f"),
+        ("cutoff", "Coupure (Hz)", 20.0, 20000.0, ".0f", "Laisse passer tout en dessous, coupe tout au-dessus"),
+        ("resonance", "Résonance (Q)", 0.1, 10.0, ".2f", "Amplification autour de la fréquence de coupure"),
     ],
     "High-Pass Filter": [
-        ("cutoff", "Coupure (Hz)", 20.0, 20000.0, ".0f"),
-        ("resonance", "Résonance (Q)", 0.1, 10.0, ".2f"),
+        ("cutoff", "Coupure (Hz)", 20.0, 20000.0, ".0f", "Laisse passer tout au-dessus, coupe tout en dessous"),
+        ("resonance", "Résonance (Q)", 0.1, 10.0, ".2f", "Amplification autour de la fréquence de coupure"),
     ],
     "Band-Pass Filter": [
-        ("center", "Centre (Hz)", 50.0, 15000.0, ".0f"),
-        ("bandwidth", "Largeur (Hz)", 10.0, 5000.0, ".0f"),
+        ("center", "Centre (Hz)", 50.0, 15000.0, ".0f", "Fréquence centrale de la bande laissée passer"),
+        ("bandwidth", "Largeur (Hz)", 10.0, 5000.0, ".0f", "Largeur de la bande autour du centre"),
     ],
     "10-Band EQ": None,  # traitement spécial
     "Noise Gate": [
-        ("threshold_db", "Seuil (dB)", -80.0, 0.0, ".1f"),
-        ("attack_ms", "Attack (ms)", 0.1, 100.0, ".1f"),
-        ("release_ms", "Release (ms)", 1.0, 1000.0, ".0f"),
+        ("threshold_db", "Seuil (dB)", -80.0, 0.0, ".1f", "En dessous de ce volume, le son est coupé"),
+        ("attack_ms", "Attack (ms)", 0.1, 100.0, ".1f", "Temps pour ouvrir la porte quand la voix commence"),
+        ("release_ms", "Release (ms)", 1.0, 1000.0, ".0f", "Temps pour fermer la porte quand la voix s'arrête"),
     ],
     "Compressor": [
-        ("threshold_db", "Seuil (dB)", -60.0, 0.0, ".1f"),
-        ("ratio", "Ratio", 1.0, 20.0, ".1f"),
-        ("attack_ms", "Attack (ms)", 0.1, 100.0, ".1f"),
-        ("release_ms", "Release (ms)", 1.0, 1000.0, ".0f"),
-        ("makeup_gain_db", "Makeup Gain (dB)", -20.0, 30.0, ".1f"),
+        ("threshold_db", "Seuil (dB)", -60.0, 0.0, ".1f", "Au-dessus de ce volume, la compression commence"),
+        ("ratio", "Ratio", 1.0, 20.0, ".1f", "Force de compression (4:1 = courant, 20:1 = limiteur)"),
+        ("attack_ms", "Attack (ms)", 0.1, 100.0, ".1f", "Temps de réaction quand le volume dépasse le seuil"),
+        ("release_ms", "Release (ms)", 1.0, 1000.0, ".0f", "Temps pour relâcher la compression après la baisse"),
+        ("makeup_gain_db", "Makeup Gain (dB)", -20.0, 30.0, ".1f", "Compense le volume perdu par la compression"),
     ],
     "De-Esser": [
-        ("threshold_db", "Seuil (dB)", -60.0, 0.0, ".1f"),
-        ("frequency", "Fréquence (Hz)", 1000.0, 16000.0, ".0f"),
-        ("reduction_db", "Réduction (dB)", 0.0, 24.0, ".1f"),
+        ("threshold_db", "Seuil (dB)", -60.0, 0.0, ".1f", "Niveau à partir duquel les sibilantes sont atténuées"),
+        ("frequency", "Fréquence (Hz)", 1000.0, 16000.0, ".0f", "Zone de fréquence ciblée (sibilantes ~5-8 kHz)"),
+        ("reduction_db", "Réduction (dB)", 0.0, 24.0, ".1f", "Combien les sibilantes sont réduites en volume"),
     ],
 }
 
@@ -822,13 +827,15 @@ class VoiceTab(tk.Frame):
                      font=("Segoe UI", 8)).pack(padx=8, pady=4)
             return
 
-        for param_key, label, from_, to_, fmt in meta:
+        for entry in meta:
+            param_key, label, from_, to_, fmt = entry[:5]
+            desc = entry[5] if len(entry) > 5 else ""
             initial = effect.params.get(param_key, (from_ + to_) / 2)
 
             def on_change(v, eff=effect, key=param_key):
                 eff.params[key] = v
 
-            slider = ParamSlider(parent, label, from_, to_, initial, on_change, fmt)
+            slider = ParamSlider(parent, label, from_, to_, initial, on_change, fmt, desc=desc)
             slider.pack(fill="x", padx=8, pady=1)
             self._param_sliders[(effect.name, param_key)] = slider
 
