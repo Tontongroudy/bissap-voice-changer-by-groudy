@@ -95,10 +95,12 @@ class FormantShifter(BaseEffect):
 class Vibrato(BaseEffect):
     """Vibrato — modulation de pitch par LFO."""
 
+    _MAX_DEPTH_MS = 25.0  # profondeur max supportée (ms)
+
     def __init__(self):
         super().__init__("Vibrato")
         self.params = {"rate": 5.0, "depth": 0.5}  # Hz, ms
-        self._buf = None
+        self._buf = None  # alloué à taille max au premier appel
         self._phase = 0.0
         self._wpos = 0
 
@@ -109,10 +111,12 @@ class Vibrato(BaseEffect):
 
     def _process(self, audio, sr):
         rate = self.params["rate"]
-        depth_ms = self.params["depth"]
-        max_d = max(4, int(sr * depth_ms / 1000.0 * 2))
-        if self._buf is None or len(self._buf) < max_d * 2:
+        depth_ms = min(self.params["depth"], self._MAX_DEPTH_MS)
+        max_d = max(4, int(sr * self._MAX_DEPTH_MS / 1000.0 * 2))
+        # Pré-alloue une fois à taille max, ne réalloue jamais
+        if self._buf is None:
             self._buf = np.zeros(max_d * 4)
+            self._wpos = 0
         buf = self._buf
         blen = len(buf)
         output = np.empty(len(audio))
@@ -176,10 +180,12 @@ class OctaveDoubler(BaseEffect):
 class Echo(BaseEffect):
     """Écho avec délai, feedback et mix wet/dry."""
 
+    _MAX_DELAY_MS = 2000.0  # délai max supporté (ms)
+
     def __init__(self):
         super().__init__("Echo")
         self.params = {"delay_ms": 250.0, "feedback": 0.4, "mix": 0.3}
-        self._buf = None
+        self._buf = None  # alloué à taille max au premier appel
         self._wpos = 0
 
     def reset(self):
@@ -187,15 +193,15 @@ class Echo(BaseEffect):
         self._wpos = 0
 
     def _process(self, audio, sr):
-        delay_ms = self.params["delay_ms"]
+        delay_ms = min(self.params["delay_ms"], self._MAX_DELAY_MS)
         feedback = np.clip(self.params["feedback"], 0, 0.95)
         mix = self.params["mix"]
         delay_s = max(1, int(delay_ms * sr / 1000.0))
-        need = delay_s * 2 + 4096
-        if self._buf is None or len(self._buf) < need:
-            old = self._buf if self._buf is not None else np.zeros(0)
-            self._buf = np.zeros(need)
-            self._buf[: len(old)] = old[: need]
+        # Pré-alloue une fois à taille max, ne réalloue jamais
+        if self._buf is None:
+            max_size = int(self._MAX_DELAY_MS * sr / 1000.0) * 2 + 4096
+            self._buf = np.zeros(max_size)
+            self._wpos = 0
         buf = self._buf
         blen = len(buf)
         output = np.empty(len(audio))
@@ -273,10 +279,12 @@ class Reverb(BaseEffect):
 class Chorus(BaseEffect):
     """Chorus — plusieurs voix légèrement désaccordées et déphasées."""
 
+    _MAX_VOICES = 8
+
     def __init__(self):
         super().__init__("Chorus")
         self.params = {"voices": 3, "depth": 8.0, "rate": 1.5, "mix": 0.5}
-        self._bufs = []
+        self._bufs = []   # alloué au premier appel
         self._phases = []
         self._wpos = 0
 
@@ -284,14 +292,15 @@ class Chorus(BaseEffect):
         self._bufs = []
 
     def _process(self, audio, sr):
-        voices = max(1, min(8, int(self.params["voices"])))
+        voices = max(1, min(self._MAX_VOICES, int(self.params["voices"])))
         depth_ms = self.params["depth"]
         rate = self.params["rate"]
         mix = self.params["mix"]
         max_delay = max(4, int(sr * 0.04))
-        if len(self._bufs) != voices:
-            self._bufs = [np.zeros(max_delay * 2) for _ in range(voices)]
-            self._phases = [i / voices for i in range(voices)]
+        # Pré-alloue toujours MAX_VOICES buffers, ne réalloue jamais
+        if not self._bufs:
+            self._bufs = [np.zeros(max_delay * 2) for _ in range(self._MAX_VOICES)]
+            self._phases = [i / self._MAX_VOICES for i in range(self._MAX_VOICES)]
             self._wpos = 0
         blen = len(self._bufs[0])
         depth_s = depth_ms * sr / 1000.0
@@ -402,6 +411,8 @@ class MultiTapDelay(BaseEffect):
         self._buf = None
         self._wpos = 0
 
+    _MAX_TAP_DELAY_MS = 2000.0
+
     def reset(self):
         self._buf = None
         self._wpos = 0
@@ -409,15 +420,16 @@ class MultiTapDelay(BaseEffect):
     def _process(self, audio, sr):
         mix = self.params["mix"]
         taps = [
-            (max(1, int(self.params["tap1_delay"] * sr / 1000)), self.params["tap1_level"]),
-            (max(1, int(self.params["tap2_delay"] * sr / 1000)), self.params["tap2_level"]),
-            (max(1, int(self.params["tap3_delay"] * sr / 1000)), self.params["tap3_level"]),
-            (max(1, int(self.params["tap4_delay"] * sr / 1000)), self.params["tap4_level"]),
+            (max(1, int(min(self.params["tap1_delay"], self._MAX_TAP_DELAY_MS) * sr / 1000)), self.params["tap1_level"]),
+            (max(1, int(min(self.params["tap2_delay"], self._MAX_TAP_DELAY_MS) * sr / 1000)), self.params["tap2_level"]),
+            (max(1, int(min(self.params["tap3_delay"], self._MAX_TAP_DELAY_MS) * sr / 1000)), self.params["tap3_level"]),
+            (max(1, int(min(self.params["tap4_delay"], self._MAX_TAP_DELAY_MS) * sr / 1000)), self.params["tap4_level"]),
         ]
-        max_d = max(d for d, _ in taps)
-        need = max_d * 2 + 4096
-        if self._buf is None or len(self._buf) < need:
-            self._buf = np.zeros(need)
+        # Pré-alloue une fois à taille max, ne réalloue jamais
+        if self._buf is None:
+            max_size = int(self._MAX_TAP_DELAY_MS * sr / 1000.0) * 2 + 4096
+            self._buf = np.zeros(max_size)
+            self._wpos = 0
         buf = self._buf
         blen = len(buf)
         output = np.empty(len(audio))
