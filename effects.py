@@ -61,14 +61,10 @@ class PitchShifter(BaseEffect):
         if abs(n_steps) < 0.01:
             return audio
         factor = 2.0 ** (n_steps / 12.0)
-        from fractions import Fraction
-        frac = Fraction(factor).limit_denominator(50)
-        up, down = frac.numerator, frac.denominator
-        resampled = signal.resample_poly(audio, up, down)
         n = len(audio)
-        if len(resampled) >= n:
-            return resampled[:n].astype(np.float32)
-        return np.pad(resampled, (0, n - len(resampled))).astype(np.float32)
+        pos = np.clip(np.arange(n, dtype=np.float32) * factor, 0, n - 1.001)
+        idx = pos.astype(np.int32)
+        return (audio[idx] * (1 - (pos - idx)) + audio[np.minimum(idx + 1, n - 1)] * (pos - idx)).astype(np.float32)
 
 
 class FormantShifter(BaseEffect):
@@ -170,15 +166,10 @@ class OctaveDoubler(BaseEffect):
         n_steps = int(self.params["octave"]) * 12.0
         mix = self.params["mix"]
         factor = 2.0 ** (n_steps / 12.0)
-        n_orig = len(audio)
-        from fractions import Fraction
-        frac = Fraction(factor).limit_denominator(50)
-        up, down = frac.numerator, frac.denominator
-        resampled = signal.resample_poly(audio, up, down)
-        if len(resampled) >= n_orig:
-            shifted = resampled[:n_orig].astype(np.float32)
-        else:
-            shifted = np.pad(resampled, (0, n_orig - len(resampled))).astype(np.float32)
+        n = len(audio)
+        pos = np.clip(np.arange(n, dtype=np.float32) * factor, 0, n - 1.001)
+        idx = pos.astype(np.int32)
+        shifted = (audio[idx] * (1 - (pos - idx)) + audio[np.minimum(idx + 1, n - 1)] * (pos - idx)).astype(np.float32)
         return audio * (1 - mix) + shifted * mix
 
 
@@ -474,9 +465,8 @@ class Distortion(BaseEffect):
         driven = np.tanh(audio * drive) / max(1e-9, np.tanh(drive))
         fc_hz = max(200.0, min(tone * 12000.0, sr / 2.0 * 0.99))
         b, a = signal.butter(1, fc_hz / (sr / 2.0), btype="low")
-        if self._zi is None or self._last_tone != tone:
+        if self._zi is None:
             self._zi = signal.lfilter_zi(b, a) * driven[0]
-            self._last_tone = tone
         toned, self._zi = signal.lfilter(b, a, driven, zi=self._zi)
         blended = driven * tone + toned * (1.0 - tone)
         return audio * (1 - mix) + blended * mix
@@ -598,9 +588,8 @@ class GrowlEffect(BaseEffect):
         alpha = np.sin(w0) / (2 * q)
         b = [alpha, 0, -alpha]
         a = [1 + alpha, -2 * np.cos(w0), 1 - alpha]
-        if self._zi is None or self._last_freq != freq:
+        if self._zi is None:
             self._zi = signal.lfilter_zi(b, a) * driven[0]
-            self._last_freq = freq
         filtered, self._zi = signal.lfilter(b, a, driven, zi=self._zi)
         return audio * (1 - mix) + filtered * mix
 
@@ -618,14 +607,9 @@ class HeliumEffect(BaseEffect):
         n_steps = amount * 10.0
         factor = 2.0 ** (n_steps / 12.0)
         n_orig = len(audio)
-        from fractions import Fraction
-        frac = Fraction(factor).limit_denominator(50)
-        up, down = frac.numerator, frac.denominator
-        resampled = signal.resample_poly(audio, up, down)
-        if len(resampled) >= n_orig:
-            pitched = resampled[:n_orig].astype(np.float32)
-        else:
-            pitched = np.pad(resampled, (0, n_orig - len(resampled))).astype(np.float32)
+        pos = np.clip(np.arange(n_orig, dtype=np.float32) * factor, 0, n_orig - 1.001)
+        idx = pos.astype(np.int32)
+        pitched = (audio[idx] * (1 - (pos - idx)) + audio[np.minimum(idx + 1, n_orig - 1)] * (pos - idx)).astype(np.float32)
         fd = rfft(pitched)
         fl = len(fd)
         out_fd = np.zeros(fl, dtype=complex)
@@ -660,9 +644,8 @@ class TelephoneFilter(BaseEffect):
         if lo >= hi:
             return audio
         b, a = signal.butter(4, [lo, hi], btype="band")
-        if self._zi is None or self._last_lo != lo or self._last_hi != hi:
+        if self._zi is None:
             self._zi = signal.lfilter_zi(b, a) * audio[0]
-            self._last_lo, self._last_hi = lo, hi
         filtered, self._zi = signal.lfilter(b, a, audio, zi=self._zi)
         dist = self.params["distortion"]
         if dist > 0:
@@ -709,6 +692,10 @@ class RadioEffect(BaseEffect):
     def __init__(self):
         super().__init__("Radio Effect")
         self.params = {"noise_level": 0.04, "bandwidth": 0.5}
+        self._zi = None
+
+    def reset(self):
+        self._zi = None
 
     def _process(self, audio, sr):
         noise_level = self.params["noise_level"]
@@ -719,7 +706,9 @@ class RadioEffect(BaseEffect):
         if lo >= hi:
             lo = 0.01
         b, a = signal.butter(4, [lo, hi], btype="band")
-        filtered = signal.lfilter(b, a, audio)
+        if self._zi is None:
+            self._zi = signal.lfilter_zi(b, a) * audio[0]
+        filtered, self._zi = signal.lfilter(b, a, audio, zi=self._zi)
         saturated = np.tanh(filtered * 2.0) * 0.65
         noise = np.random.normal(0, noise_level, len(audio))
         return np.clip(saturated + noise, -1.0, 1.0)
@@ -747,9 +736,8 @@ class UnderwaterEffect(BaseEffect):
         cutoff = max(100.0, 2000.0 * (1.0 - depth))
         nyq = sr / 2.0
         b, a = signal.butter(3, min(cutoff, nyq * 0.99) / nyq, btype="low")
-        if self._zi is None or abs((self._last_cutoff or 0) - cutoff) > 1.0:
+        if self._zi is None:
             self._zi = signal.lfilter_zi(b, a) * audio[0]
-            self._last_cutoff = cutoff
         filtered, self._zi = signal.lfilter(b, a, audio, zi=self._zi)
         t = np.arange(len(audio)) / sr
         mod = 1.0 + wobble * 0.3 * np.sin(2 * np.pi * rate * (t + self._phase))
@@ -781,9 +769,8 @@ class LowPassFilter(BaseEffect):
         a = [1 + alpha, -2 * np.cos(w0), 1 - alpha]
         b = [x / a[0] for x in b]
         a = [x / a[0] for x in a]
-        if self._zi is None or self._last_fc != fc:
+        if self._zi is None:
             self._zi = signal.lfilter_zi(b, a) * audio[0]
-            self._last_fc = fc
         out, self._zi = signal.lfilter(b, a, audio, zi=self._zi)
         return out
 
@@ -808,9 +795,8 @@ class HighPassFilter(BaseEffect):
         a = [1 + alpha, -2 * np.cos(w0), 1 - alpha]
         b = [x / a[0] for x in b]
         a = [x / a[0] for x in a]
-        if self._zi is None or self._last_fc != fc:
+        if self._zi is None:
             self._zi = signal.lfilter_zi(b, a) * audio[0]
-            self._last_fc = fc
         out, self._zi = signal.lfilter(b, a, audio, zi=self._zi)
         return out
 
@@ -819,6 +805,10 @@ class BandPassFilter(BaseEffect):
     def __init__(self):
         super().__init__("Band-Pass Filter")
         self.params = {"center": 1000.0, "bandwidth": 500.0}
+        self._zi = None
+
+    def reset(self):
+        self._zi = None
 
     def _process(self, audio, sr):
         center = max(50.0, self.params["center"])
@@ -829,7 +819,10 @@ class BandPassFilter(BaseEffect):
         if lo >= hi:
             return audio
         b, a = signal.butter(2, [lo, hi], btype="band")
-        return signal.lfilter(b, a, audio)
+        if self._zi is None:
+            self._zi = signal.lfilter_zi(b, a) * audio[0]
+        out, self._zi = signal.lfilter(b, a, audio, zi=self._zi)
+        return out
 
 
 class Equalizer(BaseEffect):
@@ -869,9 +862,8 @@ class Equalizer(BaseEffect):
             b = [b0 / a0, b1 / a0, b2 / a0]
             a = [1.0, a1 / a0, a2 / a0]
             zi_key = freq
-            if zi_key not in self._zi_bands or self._last_gains.get(zi_key) != gain_db:
+            if zi_key not in self._zi_bands:
                 self._zi_bands[zi_key] = signal.lfilter_zi(b, a) * out[0]
-                self._last_gains[zi_key] = gain_db
             out, self._zi_bands[zi_key] = signal.lfilter(b, a, out, zi=self._zi_bands[zi_key])
         return out
 
