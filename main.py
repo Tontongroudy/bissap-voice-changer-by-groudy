@@ -1480,20 +1480,46 @@ class SoundboardTab(tk.Frame):
                  insertbackground="white", font=("Segoe UI", 10), bd=1, relief="solid"
                  ).pack(side="left", fill="x", expand=True)
 
+        def _fmt(keys):
+            """Normalise un set de noms de touches → 'ctrl+shift+1'."""
+            mods, rest = [], []
+            for k in keys:
+                k = k.lower().replace('left ', '').replace('right ', '')
+                if k in ('ctrl', 'control'):
+                    if 'ctrl' not in mods: mods.append('ctrl')
+                elif k == 'shift':
+                    if 'shift' not in mods: mods.append('shift')
+                elif k in ('alt', 'altgr'):
+                    if 'alt' not in mods: mods.append('alt')
+                else:
+                    rest.append(k)
+            return '+'.join(mods + rest)
+
         def _capture():
             if not KB_OK:
                 return
+            sc_var.set("")
             cap_btn.config(text="Appuie...", state="disabled", fg="#ffaa44")
-            win.update_idletasks()
-            def _do():
-                try:
-                    hk = kb.read_hotkey(suppress=False)
-                    sc_var.set(hk)
-                except Exception:
-                    pass
+            keys_held = set()
+            best      = ['']
+            hooks     = []
+
+            def _on_press(e):
+                keys_held.add(e.name)
+                combo = _fmt(keys_held)
+                best[0] = combo
+                sc_var.set(combo)          # affichage live
+
+            def _on_release(e):
+                if best[0]:               # finalise dès le premier relâchement
+                    sc_var.set(best[0])
+                for h in hooks:
+                    try: kb.unhook(h)
+                    except Exception: pass
                 cap_btn.config(text="⌨ Capturer", state="normal", fg="white")
-            import threading as _th
-            _th.Thread(target=_do, daemon=True).start()
+
+            hooks.append(kb.on_press(_on_press))
+            hooks.append(kb.on_release(_on_release))
 
         cap_btn = tk.Button(sc_row, text="⌨ Capturer", command=_capture,
                             bg="#2244aa", fg="white", bd=0, padx=6, font=("Segoe UI", 8))
@@ -1552,6 +1578,22 @@ class SoundboardTab(tk.Frame):
         self._build_grid()
         self.register_all_hotkeys()
 
+    @staticmethod
+    def _normalize_sc(sc: str) -> str:
+        """Normalise 'left ctrl+right shift+1' → 'ctrl+shift+1'."""
+        mods, rest = [], []
+        for p in sc.lower().split('+'):
+            p = p.strip().replace('left ', '').replace('right ', '')
+            if p in ('ctrl', 'control'):
+                if 'ctrl' not in mods: mods.append('ctrl')
+            elif p == 'shift':
+                if 'shift' not in mods: mods.append('shift')
+            elif p in ('alt', 'altgr'):
+                if 'alt' not in mods: mods.append('alt')
+            else:
+                rest.append(p)
+        return '+'.join(mods + rest)
+
     def register_all_hotkeys(self):
         """Enregistre (ou re-enregistre) tous les raccourcis globaux du soundboard."""
         if not KB_OK:
@@ -1565,12 +1607,13 @@ class SoundboardTab(tk.Frame):
         self._hotkeys.clear()
 
         for slot in self.app.soundboard_manager.slots:
-            sc = slot.shortcut.strip()
-            if not sc:
+            raw = slot.shortcut.strip()
+            if not raw:
                 continue
+            sc = self._normalize_sc(raw)
             try:
                 idx = slot.index
-                kb.add_hotkey(sc, lambda i=idx: self._hotkey_play(i))
+                kb.add_hotkey(sc, lambda i=idx: self._hotkey_play(i), suppress=False)
                 self._hotkeys[idx] = sc
                 print(f"[Soundboard] Hotkey '{sc}' → slot {idx + 1}")
             except Exception as e:
