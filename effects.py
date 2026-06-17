@@ -50,28 +50,42 @@ class BaseEffect:
 # ──────────────────────────────────────────────────────────────────────────────
 
 class PitchShifter(BaseEffect):
-    """Pitch shifting par interpolation avec crossfade inter-blocs."""
+    """Pitch shifting via resample_poly + crossfade inter-blocs."""
 
     _XFADE = 64
 
     def __init__(self):
         super().__init__("Pitch Shifter")
         self.params = {"semitones": 0.0}
-        self._prev_tail = None
+        self._prev_tail   = None
+        self._up = self._down = None
+        self._last_steps  = None
 
     def reset(self):
-        self._prev_tail = None
+        self._prev_tail  = None
+        self._up = self._down = None
+        self._last_steps = None
 
     def _process(self, audio, sr):
+        from fractions import Fraction
         n_steps = self.params["semitones"]
         if abs(n_steps) < 0.01:
             return audio
         factor = 2.0 ** (n_steps / 12.0)
         n = len(audio)
-        pos = np.clip(np.arange(n, dtype=np.float64) * factor, 0, n - 1.001)
-        idx = pos.astype(np.int32)
-        frac = (pos - idx).astype(np.float32)
-        output = (audio[idx] * (1 - frac) + audio[np.minimum(idx + 1, n - 1)] * frac).astype(np.float32)
+
+        if self._last_steps != round(n_steps, 3):
+            frac = Fraction(factor).limit_denominator(100)
+            self._up, self._down = frac.numerator, frac.denominator
+            self._last_steps = round(n_steps, 3)
+
+        resampled = signal.resample_poly(audio, self._up, self._down)
+        if len(resampled) >= n:
+            output = resampled[:n].astype(np.float32)
+        else:
+            output = np.zeros(n, dtype=np.float32)
+            output[:len(resampled)] = resampled
+
         xf = self._XFADE
         if self._prev_tail is not None and len(self._prev_tail) == xf:
             fade_in = np.linspace(0.0, 1.0, xf, dtype=np.float32)
@@ -171,30 +185,21 @@ class Tremolo(BaseEffect):
 class OctaveDoubler(BaseEffect):
     """Doubler d'octave — voix parallèle une octave en dessous ou au-dessus."""
 
-    _XFADE = 64
-
     def __init__(self):
         super().__init__("Octave Doubler")
-        self.params = {"octave": -1, "mix": 0.5}  # octave: -1 ou +1
-        self._prev_tail = None
-
-    def reset(self):
-        self._prev_tail = None
+        self.params = {"octave": -1, "mix": 0.5}
 
     def _process(self, audio, sr):
         n_steps = int(self.params["octave"]) * 12.0
         mix = self.params["mix"]
-        factor = 2.0 ** (n_steps / 12.0)
+        factor = 2.0 if n_steps > 0 else 0.5  # toujours ±1 octave = ratio entier
         n = len(audio)
-        pos = np.clip(np.arange(n, dtype=np.float64) * factor, 0, n - 1.001)
-        idx = pos.astype(np.int32)
-        frac = (pos - idx).astype(np.float32)
-        shifted = (audio[idx] * (1 - frac) + audio[np.minimum(idx + 1, n - 1)] * frac).astype(np.float32)
-        xf = self._XFADE
-        if self._prev_tail is not None and len(self._prev_tail) == xf:
-            fade_in = np.linspace(0.0, 1.0, xf, dtype=np.float32)
-            shifted[:xf] = shifted[:xf] * fade_in + self._prev_tail * (1.0 - fade_in)
-        self._prev_tail = shifted[-xf:].copy()
+        resampled = signal.resample_poly(audio, int(factor * 2), 2) if factor != 1 else audio
+        if len(resampled) >= n:
+            shifted = resampled[:n].astype(np.float32)
+        else:
+            shifted = np.zeros(n, dtype=np.float32)
+            shifted[:len(resampled)] = resampled
         return audio * (1 - mix) + shifted * mix
 
 
@@ -628,67 +633,72 @@ class GrowlEffect(BaseEffect):
 
 
 class HeliumEffect(BaseEffect):
-    """Effet hélium / chipmunk — pitch shift + filtre high-shelf pour l'aigreur."""
+    """Effet hélium — pitch shift (resample_poly) + formant shift (FFT+fenêtre Hann)."""
 
-    _XFADE = 64  # crossfade entre blocs pour masquer la discontinuité de pitch shift
+    _XFADE = 128
 
     def __init__(self):
         super().__init__("Helium")
         self.params = {"amount": 0.5}
         self._prev_tail = None
-        self._b = self._a = None
-        self._last_amount = None
-        self._zi = None
+        self._window    = None
+        self._up = self._down = None
+        self._last_factor = None
 
     def reset(self):
         self._prev_tail = None
-        self._b = self._a = None
-        self._last_amount = None
-        self._zi = None
+        self._window    = None
+        self._up = self._down = None
+        self._last_factor = None
 
     def _process(self, audio, sr):
+        from fractions import Fraction
+
         amount = max(0.0, min(1.0, self.params["amount"]))
         if amount < 0.01:
             return audio
 
-        # Pitch shift via interpolation linéaire (rapide, pas d'artefact FFT)
         factor = 2.0 ** (amount * 10.0 / 12.0)
         n = len(audio)
-        pos = np.clip(np.arange(n, dtype=np.float64) * factor, 0, n - 1.001)
-        idx = pos.astype(np.int32)
-        frac = (pos - idx).astype(np.float32)
-        output = (audio[idx] * (1 - frac) + audio[np.minimum(idx + 1, n - 1)] * frac).astype(np.float32)
 
-        # Crossfade avec la queue du bloc précédent pour éliminer le clic de jonction
+        # ── 1. Pitch shift via resample_poly (FIR polyphase, pas d'artefact de répétition)
+        factor_key = round(factor, 5)
+        if self._last_factor != factor_key:
+            frac = Fraction(factor).limit_denominator(50)
+            self._up, self._down = frac.numerator, frac.denominator
+            self._last_factor = factor_key
+
+        resampled = signal.resample_poly(audio, self._up, self._down)
+        if len(resampled) >= n:
+            pitched = resampled[:n].astype(np.float32)
+        else:
+            pitched = np.zeros(n, dtype=np.float32)
+            pitched[:len(resampled)] = resampled
+
+        # ── 2. Formant shift via FFT avec fenêtre Hann
+        #      La fenêtre force les bords à 0 → élimine la fuite spectrale inter-blocs
+        if self._window is None or len(self._window) != n:
+            self._window = np.hanning(n).astype(np.float32)
+
+        fm_shift = 1.0 + amount * 0.6
+        fd      = rfft(pitched * self._window)
+        fl      = len(fd)
+        out_fd  = np.zeros(fl, dtype=complex)
+        indices = np.arange(fl)
+        src_idx = (indices / fm_shift).astype(int)
+        valid   = src_idx < fl
+        out_fd[indices[valid]] = fd[src_idx[valid]]
+        # ×2 pour compenser l'atténuation de la fenêtre Hann (gain moyen = 0.5)
+        formanted = irfft(out_fd, n=n).astype(np.float32) * 2.0
+
+        # ── 3. Crossfade avec la queue du bloc précédent pour lisser les bords de fenêtre
         xf = self._XFADE
         if self._prev_tail is not None and len(self._prev_tail) == xf:
             fade_in = np.linspace(0.0, 1.0, xf, dtype=np.float32)
-            output[:xf] = output[:xf] * fade_in + self._prev_tail * (1.0 - fade_in)
-        self._prev_tail = output[-xf:].copy()
+            formanted[:xf] = formanted[:xf] * fade_in + self._prev_tail * (1.0 - fade_in)
+        self._prev_tail = formanted[-xf:].copy()
 
-        # High-shelf stateful pour l'effet "voix fine" (remplace le FFT formant shift)
-        a_key = round(amount, 3)
-        if self._b is None or self._last_amount != a_key:
-            fc = 1800.0
-            nyq = sr / 2.0
-            w0 = 2 * np.pi * fc / sr
-            A = 10 ** ((amount * 8.0) / 40.0)  # jusqu'à +8 dB à amount=1
-            alpha = np.sin(w0) / 2 * np.sqrt((A + 1.0 / A) * (1.0 / 1.0 - 1) + 2)
-            alpha = max(alpha, 1e-6)
-            b0 =       A * ((A+1) + (A-1)*np.cos(w0) + 2*np.sqrt(A)*alpha)
-            b1 = -2 *  A * ((A-1) + (A+1)*np.cos(w0))
-            b2 =       A * ((A+1) + (A-1)*np.cos(w0) - 2*np.sqrt(A)*alpha)
-            a0 =           (A+1) - (A-1)*np.cos(w0) + 2*np.sqrt(A)*alpha
-            a1 =  2 *     ((A-1) - (A+1)*np.cos(w0))
-            a2 =           (A+1) - (A-1)*np.cos(w0) - 2*np.sqrt(A)*alpha
-            self._b = [b0/a0, b1/a0, b2/a0]
-            self._a = [1.0,   a1/a0, a2/a0]
-            self._last_amount = a_key
-        if self._zi is None:
-            self._zi = signal.lfilter_zi(self._b, self._a) * output[0]
-        output, self._zi = signal.lfilter(self._b, self._a, output, zi=self._zi)
-
-        return np.clip(output, -1.0, 1.0).astype(np.float32)
+        return np.clip(formanted, -1.0, 1.0).astype(np.float32)
 
 
 class TelephoneFilter(BaseEffect):
