@@ -951,6 +951,9 @@ class VoiceTab(tk.Frame):
         self.app.audio_engine.output_device = idx_out
         self.app.audio_engine.monitor_device = idx_mon
         self.app.audio_engine.restart()
+        # Transmettre les périphériques au soundboard
+        self.app.soundboard_manager.speakers_device = idx_mon
+        self.app.soundboard_manager.virtual_device  = idx_out
         self._update_audio_status()
 
     def _update_audio_status(self):
@@ -1366,14 +1369,14 @@ class SoundboardTab(tk.Frame):
 
     def _create_slot_widget(self, slot, row, col):
         frame = tk.Frame(self._grid_frame, bg=slot.color, bd=2, relief="raised",
-                         height=115)
+                         height=120)
         frame.grid(row=row, column=col, padx=4, pady=4, sticky="nsew")
         frame.grid_propagate(False)
 
         # Name label
         name_lbl = tk.Label(frame, text=slot.name, bg=slot.color, fg="white",
                              font=("Segoe UI", 9, "bold"), wraplength=120)
-        name_lbl.pack(pady=(8, 2))
+        name_lbl.pack(pady=(6, 1))
 
         # File label
         file_name = Path(slot.file_path).name if slot.file_path else "— vide —"
@@ -1386,9 +1389,18 @@ class SoundboardTab(tk.Frame):
                            bg=slot.color, fg="#aaffaa", font=("Consolas", 7))
         sc_lbl.pack()
 
-        # Progress bar (simple canvas)
-        prog = tk.Canvas(frame, height=4, bg="#333333", highlightthickness=0)
-        prog.pack(fill="x", padx=4, pady=2)
+        # Status/error label
+        status_lbl = tk.Label(frame, text="", bg=slot.color, fg="#ff6666",
+                               font=("Segoe UI", 7), wraplength=120)
+        status_lbl.pack()
+
+        def _on_error(msg):
+            status_lbl.config(text=msg, fg="#ff6666")
+            frame.after(4000, lambda: status_lbl.config(text=""))
+
+        def _play(s=slot):
+            status_lbl.config(text="")
+            self.app.soundboard_manager.play(s.index, on_error=_on_error)
 
         # Buttons row
         btn_row = tk.Frame(frame, bg=slot.color)
@@ -1396,8 +1408,7 @@ class SoundboardTab(tk.Frame):
 
         play_btn = tk.Button(btn_row, text="▶", bg="#2a2a2a", fg="white",
                               font=("Consolas", 9), bd=0, padx=4,
-                              command=lambda s=slot: self.app.soundboard_manager.play(s.index),
-                              cursor="hand2")
+                              command=_play, cursor="hand2")
         play_btn.pack(side="left")
 
         stop_btn = tk.Button(btn_row, text="⏹", bg="#2a2a2a", fg="white",
@@ -1412,9 +1423,9 @@ class SoundboardTab(tk.Frame):
                               cursor="hand2")
         edit_btn.pack(side="right")
 
-        # Click on frame = play
+        # Double-clic sur le slot = lecture
         for widget in [frame, name_lbl, file_lbl]:
-            widget.bind("<Double-Button-1>", lambda e, s=slot: self.app.soundboard_manager.play(s.index))
+            widget.bind("<Double-Button-1>", lambda e, fn=_play: fn())
 
         self._slot_frames.append(frame)
 
