@@ -784,9 +784,20 @@ class VoiceTab(tk.Frame):
             canvas.itemconfig(canvas_window, width=canvas.winfo_width())
         self._effects_frame.bind("<Configure>", on_configure)
         canvas.bind("<Configure>", lambda e: canvas.itemconfig(canvas_window, width=e.width))
-        canvas.bind_all("<MouseWheel>", lambda e: canvas.yview_scroll(int(-1 * (e.delta / 120)), "units"))
+        self._effects_canvas = canvas
 
         self._build_effects_sections()
+
+    def _setup_scroll(self):
+        """Bind la molette à tous les widgets de la zone effets (récursif)."""
+        c = self._effects_canvas
+        def _scroll(e):
+            c.yview_scroll(int(-1 * (e.delta / 120)), "units")
+        def _bind(widget):
+            widget.bind("<MouseWheel>", _scroll)
+            for child in widget.winfo_children():
+                _bind(child)
+        _bind(c)
 
     def _build_effects_sections(self):
         ec = self.app.effects_chain
@@ -797,6 +808,7 @@ class VoiceTab(tk.Frame):
             section.enabled_var.trace_add("write", lambda *a, e=effect, s=section: self._toggle_effect(e, s))
             self._section_widgets[effect.name] = section
             self._build_effect_params(effect, section.content)
+        self.after(100, self._setup_scroll)
 
     def _build_effect_params(self, effect, parent):
         meta = EFFECT_PARAMS_META.get(effect.name)
@@ -930,14 +942,17 @@ class VoiceTab(tk.Frame):
             self.app.audio_engine.output_volume = val
 
     def refresh_devices(self, in_devices, out_devices):
+        def label(d):
+            return f"[{d['index']}] {d['name']}"
+
         def fill_menu(menu_widget, var, items, add_default=True):
             m = menu_widget["menu"]
             m.delete(0, "end")
             if add_default:
                 m.add_command(label="Défaut", command=lambda: var.set("Défaut"))
             for d in items:
-                name = d["name"]
-                m.add_command(label=name, command=lambda n=name, v=var: v.set(n))
+                lbl = label(d)
+                m.add_command(label=lbl, command=lambda n=lbl, v=var: v.set(n))
 
         fill_menu(self.in_dev_menu, self.in_dev_var, in_devices)
         fill_menu(self.out_dev_menu, self.out_dev_var, out_devices)
@@ -946,7 +961,7 @@ class VoiceTab(tk.Frame):
         # Auto-sélectionner le câble VB-Audio s'il est détecté
         for d in out_devices:
             if "cable" in d["name"].lower() or "vb-audio" in d["name"].lower():
-                self.out_dev_var.set(d["name"])
+                self.out_dev_var.set(label(d))
                 break
 
     def sync_from_chain(self):
@@ -1472,6 +1487,13 @@ class App:
         self.root.minsize(900, 640)
         self.root.configure(bg="#13131f")
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        # Icône de la fenêtre
+        ico = Path(__file__).parent / "bissap.ico"
+        if ico.exists():
+            try:
+                self.root.iconbitmap(str(ico))
+            except Exception:
+                pass
 
     def _build_ui(self):
         # Menu bar
@@ -1566,8 +1588,8 @@ class App:
                         for i, d in enumerate(all_devs) if d["max_output_channels"] > 0]
         except Exception:
             in_devs, out_devs = [], []
-        self._in_device_map = {"Défaut": None, **{d["name"]: d["index"] for d in in_devs}}
-        self._out_device_map = {"Défaut": None, **{d["name"]: d["index"] for d in out_devs}}
+        self._in_device_map  = {"Défaut": None, **{f"[{d['index']}] {d['name']}": d["index"] for d in in_devs}}
+        self._out_device_map = {"Défaut": None, **{f"[{d['index']}] {d['name']}": d["index"] for d in out_devs}}
         self.voice_tab.refresh_devices(in_devs, out_devs)
 
     def _start_vu_loop(self):
