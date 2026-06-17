@@ -596,7 +596,7 @@ class VoiceTab(tk.Frame):
             "ÉTAPE 1 — Installer VB-Audio Virtual Cable\n"
             "  → Télécharger sur : vb-audio.com/Cable\n"
             "  → Installer et REDÉMARRER Windows\n\n"
-            "ÉTAPE 2 — Configurer Voice Modifier Pro\n"
+            "ÉTAPE 2 — Configurer Bissap Voice Changer\n"
             "  🎙 Micro (entrée)     : votre vrai micro\n"
             "  🔌 Câble virtuel (sortie) : CABLE Input (VB-Audio)\n"
             "  🔊 Haut-parleurs (monitor): vos écouteurs/HP\n"
@@ -1161,7 +1161,7 @@ class App:
         self._start_vu_loop()
 
     def _setup_window(self):
-        self.root.title("Voice Modifier Pro")
+        self.root.title("Bissap Voice Changer by Groudy")
         geom = self.config.get("window_geometry", "1300x850")
         self.root.geometry(geom)
         self.root.minsize(900, 640)
