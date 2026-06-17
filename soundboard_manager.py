@@ -17,11 +17,31 @@ except ImportError:
     SF_OK = False
 
 try:
-    import pygame
-    pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=512)
-    PYGAME_OK = True
-except Exception:
-    PYGAME_OK = False
+    import pygame as _pygame
+    PYGAME_IMPORTED = True
+except ImportError:
+    _pygame = None
+    PYGAME_IMPORTED = False
+
+_PYGAME_MIXER_READY = False  # initialisé la première fois qu'on en a besoin
+
+def _ensure_mixer():
+    global _PYGAME_MIXER_READY
+    if _PYGAME_MIXER_READY:
+        return True
+    if not PYGAME_IMPORTED:
+        return False
+    for freq in [44100, 48000, 22050]:
+        try:
+            _pygame.mixer.init(frequency=freq, size=-16, channels=2, buffer=1024)
+            _PYGAME_MIXER_READY = True
+            return True
+        except Exception:
+            try:
+                _pygame.mixer.quit()
+            except Exception:
+                pass
+    return False
 
 
 class SoundSlot:
@@ -174,43 +194,65 @@ class SoundboardManager:
     def _decode(self, path: str):
         """Retourne (numpy float32 array, sample_rate) ou (None, None) si pygame.music."""
         ext = Path(path).suffix.lower()
+        last_err = None
 
-        # 1. soundfile : WAV, OGG, FLAC, AIFF, etc.
+        # 1. soundfile : WAV, OGG, FLAC, AIFF (ne supporte pas MP3 nativement)
         if SF_OK and ext != '.mp3':
             try:
                 data, sr = sf.read(path, dtype='float32', always_2d=False)
                 return data, sr
-            except Exception:
-                pass
+            except Exception as e:
+                last_err = e
 
-        # 2. pygame.sndarray : WAV, OGG (donne le tableau numpy directement)
-        if PYGAME_OK and ext != '.mp3':
+        # 2. Module wave intégré Python — WAV uniquement, aucune dépendance
+        if ext == '.wav':
             try:
-                sound = pygame.mixer.Sound(path)
-                arr = pygame.sndarray.samples(sound).astype(np.float32)
-                # pygame retourne des int16 dans un float array → normaliser
+                import wave, struct
+                with wave.open(path, 'rb') as wf:
+                    n_ch  = wf.getnchannels()
+                    sr    = wf.getframerate()
+                    sw    = wf.getsampwidth()
+                    n_fr  = wf.getnframes()
+                    raw   = wf.readframes(n_fr)
+                dtype = {1: np.int8, 2: np.int16, 4: np.int32}.get(sw, np.int16)
+                arr = np.frombuffer(raw, dtype=dtype).astype(np.float32)
+                arr /= float(np.iinfo(dtype).max)
+                if n_ch > 1:
+                    arr = arr.reshape(-1, n_ch).mean(axis=1)
+                return arr, sr
+            except Exception as e:
+                last_err = e
+
+        # 3. pygame.mixer.Sound + sndarray (WAV, OGG)
+        if ext != '.mp3' and _ensure_mixer():
+            try:
+                sound = _pygame.mixer.Sound(path)
+                arr = _pygame.sndarray.samples(sound).astype(np.float32)
                 if arr.max() > 1.5:
                     arr = arr / 32768.0
                 if arr.ndim > 1:
                     arr = arr.mean(axis=1)
-                sr = pygame.mixer.get_init()[0]
+                sr = _pygame.mixer.get_init()[0]
                 return arr, sr
-            except Exception:
-                pass
-
-        # 3. MP3 via pygame.mixer.music (lecture directe, périphérique par défaut)
-        if PYGAME_OK:
-            try:
-                pygame.mixer.music.load(path)
-                pygame.mixer.music.set_volume(1.0)
-                pygame.mixer.music.play()
-                return None, None   # déjà en lecture
             except Exception as e:
-                raise RuntimeError(f"Impossible de lire le MP3 : {e}")
+                last_err = e
 
+        # 4. MP3 via pygame.mixer.music (joue sur périphérique défaut Windows)
+        if _ensure_mixer():
+            try:
+                _pygame.mixer.music.load(path)
+                _pygame.mixer.music.set_volume(1.0)
+                _pygame.mixer.music.play()
+                return None, None   # déjà en lecture via pygame
+            except Exception as e:
+                last_err = e
+
+        # Aucun décodeur n'a fonctionné
+        ext_up = ext.upper().lstrip('.')
         raise RuntimeError(
-            "Aucun décodeur disponible.\n"
-            "Installe : pip install soundfile sounddevice"
+            f"Impossible de lire ce fichier {ext_up}.\n"
+            f"Lance install.bat pour réinstaller les dépendances."
+            + (f"\n({last_err})" if last_err else "")
         )
 
     # ── Stop ──────────────────────────────────────────────────────────
@@ -235,10 +277,10 @@ class SoundboardManager:
                 s.close()
             except Exception:
                 pass
-        if PYGAME_OK:
+        if _PYGAME_MIXER_READY:
             try:
-                pygame.mixer.music.stop()
-                pygame.mixer.stop()
+                _pygame.mixer.music.stop()
+                _pygame.mixer.stop()
             except Exception:
                 pass
 
