@@ -1197,6 +1197,16 @@ class ProfilesTab(tk.Frame):
         btn(btn_row, "📥 Importer JSON", self._import_profile, "#1f4a6a")
         btn(btn_row, "⊘ Désactiver tous", self._deactivate_all, "#333355")
 
+        self._hk_enabled = True
+        self._hk_toggle_btn = tk.Button(
+            btn_row, text="⌨ Raccourcis ON",
+            command=self._toggle_hotkeys,
+            bg="#1a3a1a", fg="#88ff88",
+            font=("Segoe UI", 9), bd=0, padx=8, pady=4, cursor="hand2",
+            activebackground="#2a4a2a"
+        )
+        self._hk_toggle_btn.pack(side="left", padx=3)
+
         # Split view
         content = tk.Frame(self, bg="#13131f")
         content.pack(fill="both", expand=True, padx=8)
@@ -1367,9 +1377,21 @@ class ProfilesTab(tk.Frame):
             except Exception:
                 pass
 
+    def _toggle_hotkeys(self):
+        self._hk_enabled = not self._hk_enabled
+        if self._hk_enabled:
+            self.setup_all_hotkeys()
+            self._hk_toggle_btn.config(text="⌨ Raccourcis ON",  bg="#1a3a1a", fg="#88ff88")
+        else:
+            for sc in list(self._hotkeys.values()):
+                try: kb.remove_hotkey(sc)
+                except Exception: pass
+            self._hotkeys.clear()
+            self._hk_toggle_btn.config(text="⌨ Raccourcis OFF", bg="#3a1a1a", fg="#ff8888")
+
     def setup_all_hotkeys(self):
         """Enregistre tous les raccourcis au démarrage."""
-        if not KB_OK:
+        if not KB_OK or not self._hk_enabled:
             return
         for p in self.app.profile_manager.list_profiles():
             name = p["name"]
@@ -1399,9 +1421,10 @@ class SoundboardTab(tk.Frame):
         self._slot_frames: list = []
         self._hotkeys: dict = {}
         # Polling hotkeys
-        self._sb_map: dict = {}         # frozenset → slot index
-        self._sb_armed: set = set()     # combos déjà déclenchés (anti-repeat)
+        self._sb_map: dict = {}
+        self._sb_armed: set = set()
         self._polling = False
+        self._sb_hk_enabled = True
         self._build()
 
     def _build(self):
@@ -1424,6 +1447,15 @@ class SoundboardTab(tk.Frame):
                        bg="#13131f", fg="#aaaacc", selectcolor="#2a2a3a",
                        activebackground="#13131f", font=("Segoe UI", 9)
                        ).pack(side="left", padx=8)
+
+        self._sb_hk_btn = tk.Button(
+            top, text="⌨ Raccourcis ON",
+            command=self._toggle_sb_hotkeys,
+            bg="#1a3a1a", fg="#88ff88",
+            font=("Segoe UI", 9), bd=0, padx=8, pady=4, cursor="hand2",
+            activebackground="#2a4a2a"
+        )
+        self._sb_hk_btn.pack(side="left", padx=3)
 
         # Grid
         grid_outer = tk.Frame(self, bg="#13131f")
@@ -1727,21 +1759,30 @@ class SoundboardTab(tk.Frame):
             self._polling = True
             self._poll_hotkeys()
 
+    def _toggle_sb_hotkeys(self):
+        self._sb_hk_enabled = not self._sb_hk_enabled
+        if self._sb_hk_enabled:
+            self._sb_hk_btn.config(text="⌨ Raccourcis ON",  bg="#1a3a1a", fg="#88ff88")
+        else:
+            self._sb_armed.clear()
+            self._sb_hk_btn.config(text="⌨ Raccourcis OFF", bg="#3a1a1a", fg="#ff8888")
+
     def _poll_hotkeys(self):
         """Vérifie toutes les 40 ms si une combinaison est enfoncée."""
         if not KB_OK:
             self._polling = False
             return
-        try:
-            for combo, idx in list(self._sb_map.items()):
-                all_held = all(self._is_down(k) for k in combo)
-                if all_held and combo not in self._sb_armed:
-                    self._sb_armed.add(combo)
-                    self._trigger_play(idx)
-                elif not all_held:
-                    self._sb_armed.discard(combo)
-        except Exception:
-            pass
+        if self._sb_hk_enabled:
+            try:
+                for combo, idx in list(self._sb_map.items()):
+                    all_held = all(self._is_down(k) for k in combo)
+                    if all_held and combo not in self._sb_armed:
+                        self._sb_armed.add(combo)
+                        self._trigger_play(idx)
+                    elif not all_held:
+                        self._sb_armed.discard(combo)
+            except Exception:
+                pass
         self.after(40, self._poll_hotkeys)
 
     def _trigger_play(self, index: int):
