@@ -22,11 +22,11 @@
 
 Application de bureau qui capte le micro, applique une chaîne d'effets audio en temps réel et renvoie la voix modifiée vers un câble audio virtuel, que Discord ou OBS voient comme un micro.
 
-- 🎛️ **29 effets DSP** codés avec NumPy/SciPy : pitch, formants, reverb, echo, chorus, flanger, phaser, vocoder, robot, radio, téléphone, sous l'eau, EQ, compresseur, noise gate, de-esser...
-- 🔗 **Chaîne d'effets** combinables, réglables en direct, avec bouton bypass
-- 🎭 **Profils** sauvegardés et activables par raccourci clavier pendant un appel
-- 🎵 **Soundboard** avec raccourcis par son
-- 🎧 **Retour casque** séparé et latence réglable
+- **29 effets DSP** codés avec NumPy/SciPy : pitch, formants, reverb, echo, chorus, flanger, phaser, vocoder, robot, radio, téléphone, sous l'eau, EQ, compresseur, noise gate, de-esser...
+- **Chaîne d'effets** combinables, réglables en direct, avec bouton bypass
+- **Profils** sauvegardés et activables par raccourci clavier pendant un appel
+- **Soundboard** avec raccourcis par son
+- **Retour casque** séparé et latence réglable
 
 ## Architecture
 
@@ -38,13 +38,13 @@ Application de bureau qui capte le micro, applique une chaîne d'effets audio en
 | `soundboard_manager.py` | Lecture des sons et raccourcis |
 | `main.py` | Interface CustomTkinter (onglets Voix / Profils / Soundboard) |
 
-📖 Tutoriel détaillé : [TUTORIEL.md](TUTORIEL.md)
+Tutoriel détaillé : [TUTORIEL.md](TUTORIEL.md)
 
 ---
 
 # Guide d'installation
 
-Pas besoin d'être informaticien — suis juste les étapes dans l'ordre.
+Pas besoin d'être informaticien, suis juste les étapes dans l'ordre.
 
 ---
 
@@ -95,7 +95,7 @@ L'application s'ouvre sans fenêtre noire.
 
 Quand l'app est ouverte, dans l'onglet **"Modificateur de voix"** :
 
-### Étape 1 — Identifier tes périphériques
+### Étape 1 : Identifier tes périphériques
 
 Clique sur **"🔍 Tester périphériques"**.  
 Une fenêtre s'ouvre avec deux colonnes :
@@ -103,7 +103,7 @@ Une fenêtre s'ouvre avec deux colonnes :
 - **Colonne gauche (micros)** : parle dans ton micro → regarde quel niveau monte → note le numéro entre crochets, par exemple `[3]`
 - **Colonne droite (sorties)** : clique sur **"♪ Bip"** sur chaque ligne → écoute d'où vient le son → note le numéro de tes écouteurs/HP, par exemple `[1]`
 
-### Étape 2 — Régler les 3 champs
+### Étape 2 : Régler les 3 champs
 
 | Champ | Ce qu'il faut mettre |
 |---|---|
@@ -111,16 +111,16 @@ Une fenêtre s'ouvre avec deux colonnes :
 | 🔌 Câble virtuel (sortie) | Le périphérique qui s'appelle **CABLE Input (VB-Audio)** |
 | 🔊 Haut-parleurs (monitor) | Le numéro `[N]` de tes écouteurs/HP trouvé à l'étape 1 |
 
-### Étape 3 — Appliquer
+### Étape 3 : Appliquer
 
 Clique sur **"⟳ Appliquer"**. Le statut passe à **"▶ Actif"** en vert.
 
-### Étape 4 — Pour s'entendre soi-même
+### Étape 4 : Pour s'entendre soi-même
 
 Coche la case **"🎧 S'entendre"**.  
 ⚠️ Utilise des **écouteurs** (pas des HP ouverts) sinon le micro capte le son qui sort et ça fait un écho.
 
-### Étape 5 — Dans Discord
+### Étape 5 : Dans Discord
 
 1. Discord → Paramètres (roue dentée) → **Voix et vidéo**
 2. **Périphérique d'entrée** → sélectionne **"CABLE Output (VB-Audio Virtual Cable)"**
@@ -190,7 +190,7 @@ Ouvre un terminal dans le dossier et tape :
 ```
 python main.py
 ```
-Lis le message d'erreur — il indique souvent qu'une dépendance manque. Lance `install.bat` à nouveau.
+Lis le message d'erreur, il indique souvent qu'une dépendance manque. Lance `install.bat` à nouveau.
 
 ### Le câble VB-Audio n'apparaît pas dans la liste des périphériques
 
