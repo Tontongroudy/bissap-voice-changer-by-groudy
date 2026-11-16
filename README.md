@@ -1,6 +1,49 @@
-# Bissap Voice Changer by Groudy
+<p align="center">
+  <img src="bissap.png" alt="Bissap" width="110">
+</p>
 
-Modifie ta voix en temps réel pendant que tu parles sur Discord, Teams ou en stream.  
+<h1 align="center">Bissap Voice Changer</h1>
+
+<p align="center">
+  <b>Modificateur de voix temps réel et soundboard pour Discord, Teams, OBS</b>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.10+-3776AB?style=flat-square&logo=python&logoColor=white">
+  <img src="https://img.shields.io/badge/NumPy-013243?style=flat-square&logo=numpy&logoColor=white">
+  <img src="https://img.shields.io/badge/SciPy-8CAAE6?style=flat-square&logo=scipy&logoColor=white">
+  <img src="https://img.shields.io/badge/CustomTkinter-GUI-1F6FEB?style=flat-square">
+  <img src="https://img.shields.io/badge/Windows-0078D6?style=flat-square&logo=windows&logoColor=white">
+</p>
+
+---
+
+## En bref
+
+Application de bureau qui capte le micro, applique une chaîne d'effets audio en temps réel et renvoie la voix modifiée vers un câble audio virtuel, que Discord ou OBS voient comme un micro.
+
+- 🎛️ **29 effets DSP** codés avec NumPy/SciPy : pitch, formants, reverb, echo, chorus, flanger, phaser, vocoder, robot, radio, téléphone, sous l'eau, EQ, compresseur, noise gate, de-esser...
+- 🔗 **Chaîne d'effets** combinables, réglables en direct, avec bouton bypass
+- 🎭 **Profils** sauvegardés et activables par raccourci clavier pendant un appel
+- 🎵 **Soundboard** avec raccourcis par son
+- 🎧 **Retour casque** séparé et latence réglable
+
+## Architecture
+
+| Module | Rôle |
+|--------|------|
+| `audio_engine.py` | Flux audio micro → effets → câble virtuel, avec monitoring séparé (threads + file d'attente) |
+| `effects.py` | Les 29 effets et la chaîne `EffectsChain` |
+| `profile_manager.py` / `config_manager.py` | Sauvegarde des profils et de la configuration (JSON) |
+| `soundboard_manager.py` | Lecture des sons et raccourcis |
+| `main.py` | Interface CustomTkinter (onglets Voix / Profils / Soundboard) |
+
+📖 Tutoriel détaillé : [TUTORIEL.md](TUTORIEL.md)
+
+---
+
+# Guide d'installation
+
 Pas besoin d'être informaticien — suis juste les étapes dans l'ordre.
 
 ---
